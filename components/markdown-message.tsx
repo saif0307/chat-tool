@@ -11,7 +11,7 @@ type Props = {
 
 export function MarkdownMessage({ content }: Props) {
   return (
-    <div className="markdown-body text-[15px] leading-relaxed">
+    <div className="markdown-body min-w-0 max-w-full break-words text-[15px] leading-relaxed [overflow-wrap:anywhere]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}

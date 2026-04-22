@@ -4,59 +4,104 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  defaultModel,
-  modelsForProvider,
-  resolveEffectiveModel,
-  type ProviderId,
-} from "@/lib/models";
+import { resolveEffectiveModel } from "@/lib/models";
 import { defaultTitleFromMessages, type ChatSession } from "@/lib/chat-storage";
 import { messageToPlainText } from "@/lib/message-text";
 import { MarkdownMessage } from "@/components/markdown-message";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StreamActivityBar } from "@/components/stream-activity-bar";
 import { ToolInvocationCard, type LooseToolPart } from "@/components/tool-invocation";
+import {
+  ComposerAttachmentPreview,
+  MessageAttachmentPart,
+} from "@/components/attachment-display";
+import { ATTACHMENT_ACCEPT, isAllowedAttachment } from "@/lib/attachment-allowlist";
+import { prepareAttachmentsForModel } from "@/lib/prepare-attachments";
+import type { UserMessageMetadata } from "@/lib/expand-user-message-metadata";
+import {
+  UserInlinedAttachments,
+  visibleUserMessageText,
+} from "@/components/user-inlined-attachments";
+import {
+  ChatSettingsModal,
+  type SettingsDraft,
+} from "@/components/chat-settings-modal";
+import {
+  defaultAppChatSettings,
+  normalizeAppChatSettings,
+  type AppChatSettings,
+} from "@/lib/user-settings";
 
 const MAX_ATTACH_BYTES = 12 * 1024 * 1024;
 const MAX_ATTACH_FILES = 8;
 
+/** True when the assistant bubble has something visible (text, reasoning, tools, files). */
+function assistantHasRenderableContent(m: UIMessage): boolean {
+  if (m.role !== "assistant") return true;
+  for (const part of m.parts) {
+    if (part.type === "reasoning" && (part as { text?: string }).text?.trim()) return true;
+    if (part.type === "text" && (part as { text?: string }).text?.trim()) return true;
+    if (part.type === "file") return true;
+    if (part.type === "dynamic-tool") return true;
+    if (typeof part.type === "string" && part.type.startsWith("tool-")) return true;
+  }
+  return false;
+}
+
+function fileListFromFiles(files: File[]): FileList {
+  const dt = new DataTransfer();
+  files.forEach((f) => dt.items.add(f));
+  return dt.files;
+}
+
+function filesFromClipboard(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const fromItems: File[] = [];
+  for (const item of data.items) {
+    if (item.kind === "file") {
+      const f = item.getAsFile();
+      if (f) fromItems.push(f);
+    }
+  }
+  if (fromItems.length > 0) return fromItems;
+  return Array.from(data.files);
+}
+
 type Props = {
   session: ChatSession;
+  appSettings: AppChatSettings;
+  onAppSettingsChange: (next: AppChatSettings) => void;
   onPersist: (id: string, patch: Partial<ChatSession>) => void;
-  onFork: (
-    messages: UIMessage[],
-    titleHint: string,
-    opts: {
-      provider: ProviderId;
-      model: string;
-      maxMode: boolean;
-      enableWebSearch?: boolean;
-    },
-  ) => void;
+  onFork: (messages: UIMessage[], titleHint: string) => void;
 };
 
-export function ChatSessionView({ session, onPersist, onFork }: Props) {
-  const [provider, setProvider] = useState(session.provider);
-  const [model, setModel] = useState(session.model);
-  const [maxMode, setMaxMode] = useState(session.maxMode);
-  const [enableWebSearch, setEnableWebSearch] = useState(session.enableWebSearch ?? true);
+export function ChatSessionView({
+  session,
+  appSettings,
+  onAppSettingsChange,
+  onPersist,
+  onFork,
+}: Props) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const d0 = defaultAppChatSettings();
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => ({
+    provider: d0.provider,
+    model: d0.model,
+    maxMode: d0.maxMode,
+    enableWebSearch: d0.enableWebSearch,
+    customInstructions: d0.customInstructions,
+  }));
   const [input, setInput] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
-  const [attachmentCount, setAttachmentCount] = useState(0);
+  const [attachments, setAttachments] = useState<File[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setProvider(session.provider);
-    setModel(session.model);
-    setMaxMode(session.maxMode);
-    setEnableWebSearch(session.enableWebSearch ?? true);
-  }, [session.id, session.provider, session.model, session.maxMode, session.enableWebSearch]);
-
   const effectiveModel = useMemo(
-    () => resolveEffectiveModel(provider, model, maxMode),
-    [provider, model, maxMode],
+    () =>
+      resolveEffectiveModel(appSettings.provider, appSettings.model, appSettings.maxMode),
+    [appSettings.provider, appSettings.model, appSettings.maxMode],
   );
 
   const transport = useMemo(
@@ -64,13 +109,16 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
       new DefaultChatTransport({
         api: "/api/chat",
         body: {
-          provider,
+          provider: appSettings.provider,
           model: effectiveModel,
-          maxMode,
-          enableWebSearch,
+          maxMode: appSettings.maxMode,
+          enableWebSearch: appSettings.enableWebSearch,
+          ...(appSettings.customInstructions.trim()
+            ? { customInstructions: appSettings.customInstructions.trim() }
+            : {}),
         },
       }),
-    [provider, effectiveModel, maxMode, enableWebSearch],
+    [appSettings, effectiveModel],
   );
 
   const { messages, sendMessage, status, stop, setMessages, error, clearError, regenerate } =
@@ -82,6 +130,29 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
 
   const busy = status === "streaming" || status === "submitted";
 
+  const generationStartedAtRef = useRef<number | null>(null);
+  const [thoughtSecondsByMessageId, setThoughtSecondsByMessageId] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    if (status === "submitted") {
+      generationStartedAtRef.current = Date.now();
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    const start = generationStartedAtRef.current;
+    if (start == null) return;
+    generationStartedAtRef.current = null;
+    const ms = Date.now() - start;
+    const lastAssist = [...messages].reverse().find((x) => x.role === "assistant");
+    if (!lastAssist) return;
+    const sec = Math.round((ms / 1000) * 10) / 10;
+    setThoughtSecondsByMessageId((prev) => ({ ...prev, [lastAssist.id]: sec }));
+  }, [status, messages]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
@@ -91,66 +162,120 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
       const title = defaultTitleFromMessages(messages);
       onPersist(session.id, {
         messages,
-        provider,
-        model,
-        maxMode,
-        enableWebSearch,
         title,
       });
     }, 450);
     return () => window.clearTimeout(t);
-  }, [messages, provider, model, maxMode, enableWebSearch, session.id, onPersist]);
+  }, [messages, session.id, onPersist]);
 
-  useEffect(() => {
-    if (provider === "openai" && !modelsForProvider("openai").some((x) => x.id === model)) {
-      setModel(defaultModel("openai"));
-    }
-    if (provider === "anthropic" && !modelsForProvider("anthropic").some((x) => x.id === model)) {
-      setModel(defaultModel("anthropic"));
-    }
-  }, [provider, model]);
-
-  const validateFileList = useCallback((list: FileList | null): FileList | undefined => {
+  const validateFiles = useCallback((arr: File[]): File[] | undefined => {
     setAttachError(null);
-    if (!list?.length) return undefined;
-    const arr = Array.from(list);
-    if (arr.length > MAX_ATTACH_FILES) {
+    if (!arr.length) return [];
+
+    const allowed = arr.filter(isAllowedAttachment);
+    const rejected = arr.filter((f) => !isAllowedAttachment(f));
+    if (rejected.length > 0) {
+      setAttachError(
+        rejected.length === 1
+          ? `"${rejected[0].name}" is not allowed. Attach images, text files, PDFs, or spreadsheets (e.g. .xlsx, .csv).`
+          : `${rejected.length} file(s) skipped — only images, text, PDF, and spreadsheet formats are allowed.`,
+      );
+    }
+
+    if (!allowed.length) return undefined;
+
+    if (allowed.length > MAX_ATTACH_FILES) {
       setAttachError(`At most ${MAX_ATTACH_FILES} files.`);
       return undefined;
     }
-    const big = arr.find((f) => f.size > MAX_ATTACH_BYTES);
+    const big = allowed.find((f) => f.size > MAX_ATTACH_BYTES);
     if (big) {
       setAttachError(
         `"${big.name}" is too large (max ${Math.round(MAX_ATTACH_BYTES / 1024 / 1024)} MB per file).`,
       );
       return undefined;
     }
-    const dt = new DataTransfer();
-    arr.forEach((f) => dt.items.add(f));
-    return dt.files;
+    return allowed;
   }, []);
+
+  const syncFileInput = useCallback((files: File[]) => {
+    const el = fileInputRef.current;
+    if (!el) return;
+    if (files.length === 0) {
+      el.value = "";
+      return;
+    }
+    const dt = new DataTransfer();
+    files.forEach((f) => dt.items.add(f));
+    el.files = dt.files;
+  }, []);
+
+  const mergeIntoFileInput = useCallback(
+    (incoming: File[]) => {
+      if (!incoming.length) return;
+      const merged = [...attachments, ...incoming];
+      const validated = validateFiles(merged);
+      if (merged.length && !validated) return;
+      if (validated) {
+        setAttachments(validated);
+        syncFileInput(validated);
+      }
+    },
+    [attachments, validateFiles, syncFileInput],
+  );
+
+  const removeAttachment = useCallback(
+    (index: number) => {
+      const next = attachments.filter((_, i) => i !== index);
+      setAttachments(next);
+      syncFileInput(next);
+      setAttachError(null);
+    },
+    [attachments, syncFileInput],
+  );
+
+  const onPasteFiles = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (busy) return;
+      const pasted = filesFromClipboard(e.clipboardData);
+      if (!pasted.length) return;
+      e.preventDefault();
+      mergeIntoFileInput(pasted);
+    },
+    [busy, mergeIntoFileInput],
+  );
 
   const onSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       const text = input.trim();
-      const rawList = fileInputRef.current?.files ?? null;
-      const files = validateFileList(rawList);
-      if (rawList?.length && !files) return;
-      if ((!text && !files?.length) || busy) return;
+      if ((!text && !attachments.length) || busy) return;
+
+      const prepared = await prepareAttachmentsForModel(attachments, text);
+      if (prepared.error) {
+        setAttachError(prepared.error);
+        return;
+      }
+      setAttachError(null);
+
       setInput("");
+      setAttachments([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      setAttachmentCount(0);
       clearError();
       await sendMessage({
-        text: text || "(attached files)",
-        ...(files?.length ? { files } : {}),
+        text: prepared.displayText,
+        ...(prepared.files.length ? { files: fileListFromFiles(prepared.files) } : {}),
+        ...(prepared.inlinedForModel.length > 0
+          ? {
+              metadata: {
+                inlinedForModel: prepared.inlinedForModel,
+              },
+            }
+          : {}),
       });
     },
-    [input, busy, sendMessage, clearError, validateFileList],
+    [input, busy, attachments, sendMessage, clearError],
   );
-
-  const modelOptions = modelsForProvider(provider);
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -166,6 +291,19 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
     }
   }, []);
 
+  const handleSaveSettings = useCallback(() => {
+    onAppSettingsChange(
+      normalizeAppChatSettings({
+        provider: settingsDraft.provider,
+        model: settingsDraft.model,
+        maxMode: settingsDraft.maxMode,
+        enableWebSearch: settingsDraft.enableWebSearch,
+        customInstructions: settingsDraft.customInstructions.trim(),
+      }),
+    );
+    setSettingsOpen(false);
+  }, [settingsDraft, onAppSettingsChange]);
+
   const forkHere = useCallback(
     (messageIndex: number) => {
       const slice = messages.slice(0, messageIndex + 1);
@@ -173,83 +311,61 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
         messages[messageIndex]?.role === "user"
           ? `Fork · ${messageToPlainText(messages[messageIndex]).slice(0, 40) || "message"}`
           : `Fork · ${defaultTitleFromMessages(slice)}`;
-      onFork(structuredClone(slice), hint, {
-        provider,
-        model,
-        maxMode,
-        enableWebSearch,
-      });
+      onFork(structuredClone(slice), hint);
     },
-    [messages, onFork, provider, model, maxMode, enableWebSearch],
+    [messages, onFork],
   );
 
   return (
     <div className="bg-zinc-50 dark:bg-background flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="border-foreground/10 flex flex-shrink-0 flex-wrap items-center gap-3 border-b px-4 py-3">
-        <h1 className="text-foreground min-w-0 shrink truncate text-lg font-semibold tracking-tight">
-          {defaultTitleFromMessages(messages)}
-        </h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-foreground/70 flex items-center gap-1.5 text-sm">
-            <span className="whitespace-nowrap">Provider</span>
-            <select
-              value={provider}
-              onChange={(e) => {
-                const p = e.target.value as ProviderId;
-                setProvider(p);
-                setModel(defaultModel(p));
-              }}
-              className="border-foreground/15 bg-background text-foreground focus:ring-foreground/20 rounded-lg border px-2.5 py-1.5 text-sm outline-none focus:ring-2"
-            >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-            </select>
-          </label>
-          <label className="text-foreground/65 flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={maxMode}
-              onChange={(e) => setMaxMode(e.target.checked)}
-              className="accent-foreground h-4 w-4 rounded border"
-            />
-            <span title="Uses the strongest model for this provider and allows longer outputs">
-              Max mode
-            </span>
-          </label>
-          <label className="text-foreground/65 flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={enableWebSearch}
-              onChange={(e) => setEnableWebSearch(e.target.checked)}
-              className="accent-foreground h-4 w-4 rounded border"
-            />
-            <span title="Default: OpenAI/Anthropic hosted web search (billed by them). Or set WEB_SEARCH_BACKEND=firecrawl + FIRECRAWL_API_KEY">
-              Live web search
-            </span>
-          </label>
-          {!maxMode && (
-            <label className="text-foreground/70 flex items-center gap-1.5 text-sm">
-              <span className="whitespace-nowrap">Model</span>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="border-foreground/15 bg-background text-foreground focus:ring-foreground/20 max-w-[min(100vw-10rem,320px)] rounded-lg border px-2.5 py-1.5 text-sm outline-none focus:ring-2"
-              >
-                {modelOptions.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {maxMode && (
-            <span className="text-foreground/55 text-xs">
-              Max model: <span className="font-mono">{effectiveModel}</span>
-            </span>
-          )}
+      <header className="border-foreground/10 flex flex-shrink-0 flex-wrap items-start gap-3 border-b px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-foreground truncate text-lg font-semibold tracking-tight">
+            {defaultTitleFromMessages(messages)}
+          </h1>
+          <p
+            className="text-foreground/50 mt-0.5 truncate text-xs tabular-nums"
+            title="Default for all chats — change in Settings"
+          >
+            {appSettings.provider === "openai" ? "OpenAI" : "Anthropic"}
+            {appSettings.maxMode
+              ? " · Max"
+              : ` · ${effectiveModel}`}
+            {appSettings.enableWebSearch === false ? " · Web off" : ""}
+          </p>
         </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2 pt-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsDraft({
+                provider: appSettings.provider,
+                model: appSettings.model,
+                maxMode: appSettings.maxMode,
+                enableWebSearch: appSettings.enableWebSearch,
+                customInstructions: appSettings.customInstructions,
+              });
+              setSettingsOpen(true);
+            }}
+            title="Settings"
+            aria-label="Open settings"
+            className="border-foreground/15 bg-background text-foreground hover:bg-foreground/5 inline-flex h-9 w-9 items-center justify-center rounded-lg border"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-[18px] w-[18px]"
+              aria-hidden
+            >
+              <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+            </svg>
+          </button>
           <ThemeToggle />
           <button
             type="button"
@@ -284,30 +400,41 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-xl border border-transparent pr-1">
           {messages.length === 0 && (
-            <p className="text-foreground/50 px-1 text-center text-sm">
-              Add{" "}
-              <code className="bg-foreground/10 rounded px-1 py-0.5 font-mono text-xs">
-                OPENAI_API_KEY
-              </code>{" "}
-              /{" "}
-              <code className="bg-foreground/10 rounded px-1 py-0.5 font-mono text-xs">
-                ANTHROPIC_API_KEY
-              </code>{" "}
-              to your env. Add{" "}
-              optional{" "}
-              <code className="bg-foreground/10 rounded px-1 py-0.5 font-mono text-xs">
-                FIRECRAWL_API_KEY
-              </code>{" "}
-              if using Firecrawl mode. Attach files below. Chats stay in this browser.
-            </p>
+            <div className="text-foreground/55 flex flex-col items-center justify-center gap-3 px-4 py-12 text-center">
+              <p className="text-foreground text-xl font-semibold tracking-tight">
+                Start a conversation
+              </p>
+              <p className="text-foreground/65 max-w-md text-sm leading-relaxed">
+                Open{" "}
+                <span className="font-medium text-foreground/80">Settings</span> (gear) for model and
+                custom instructions, then type below. Attach images or files with +. Chats persist in{" "}
+                <span className="font-medium text-foreground/80">local storage only</span>; configure
+                provider keys on the server (see{" "}
+                <code className="bg-foreground/10 rounded px-1 py-0.5 font-mono text-[13px]">
+                  .env
+                </code>
+                ).
+              </p>
+            </div>
           )}
-          {messages.map((m, idx) => (
+          {messages.map((m, idx) => {
+            const inlinedMeta =
+              m.role === "user"
+                ? (m.metadata as UserMessageMetadata | undefined)?.inlinedForModel
+                : undefined;
+            const fileAttachmentNames =
+              m.role === "user"
+                ? m.parts.flatMap((p) =>
+                    p.type === "file" && p.filename ? [p.filename] : [],
+                  )
+                : [];
+            return (
             <article
               key={m.id}
               className={`border-foreground/8 flex flex-col gap-2 rounded-xl border px-4 py-3 ${
                 m.role === "user"
-                  ? "bg-foreground/6 ml-auto max-w-[min(100%,42rem)]"
-                  : "dark:bg-zinc-700/85 bg-background border-foreground/8 mr-auto max-w-[min(100%,52rem)] border shadow-sm"
+                  ? "bg-foreground/6 ml-auto min-w-0 max-w-[min(100%,42rem)]"
+                  : "dark:bg-zinc-700/85 bg-background border-foreground/8 mr-auto min-w-0 max-w-[min(100%,52rem)] border shadow-sm"
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -355,25 +482,13 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
                     );
                   }
                   if (part.type === "file") {
-                    const isImg = part.mediaType.startsWith("image/");
                     return (
-                      <div key={`${m.id}-file-${i}`} className="my-2">
-                        {isImg ? (
-                          <img
-                            src={part.url}
-                            alt={part.filename ?? "attachment"}
-                            className="max-h-64 max-w-full rounded-lg object-contain"
-                          />
-                        ) : (
-                          <a
-                            href={part.url}
-                            download={part.filename}
-                            className="text-sky-600 text-sm underline dark:text-sky-400"
-                          >
-                            {part.filename ?? "Attached file"}
-                          </a>
-                        )}
-                      </div>
+                      <MessageAttachmentPart
+                        key={`${m.id}-file-${i}`}
+                        url={part.url}
+                        filename={part.filename}
+                        mediaType={part.mediaType}
+                      />
                     );
                   }
                   if (typeof part.type === "string" && part.type.startsWith("tool-")) {
@@ -383,22 +498,61 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
                   }
                   if (part.type === "text") {
                     const text = part.text;
-                    if (!text) return null;
+                    if (m.role === "user") {
+                      const visible = visibleUserMessageText(
+                        text,
+                        inlinedMeta,
+                        fileAttachmentNames,
+                      );
+                      if (!visible) return null;
+                      return (
+                        <div key={`${m.id}-text-${i}`}>
+                          <p className="text-foreground max-w-full min-w-0 overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                            {visible}
+                          </p>
+                        </div>
+                      );
+                    }
+                    if (!text?.trim()) return null;
                     return (
                       <div key={`${m.id}-text-${i}`}>
-                        {m.role === "user" ? (
-                          <p className="text-foreground whitespace-pre-wrap">{text}</p>
-                        ) : (
-                          <MarkdownMessage content={text} />
-                        )}
+                        <MarkdownMessage content={text} />
                       </div>
                     );
                   }
                   return null;
                 })}
+                {inlinedMeta && inlinedMeta.length > 0 ? (
+                  <UserInlinedAttachments items={inlinedMeta} />
+                ) : null}
+                {m.role === "assistant" &&
+                  busy &&
+                  messages.at(-1)?.id === m.id &&
+                  !assistantHasRenderableContent(m) && (
+                    <div
+                      className="text-foreground/60 mt-1 flex items-center gap-3 py-2"
+                      aria-live="polite"
+                      aria-busy="true"
+                    >
+                      <span
+                        className="border-foreground/35 inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-t-sky-500"
+                        aria-hidden
+                      />
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        <div className="bg-foreground/12 h-2.5 w-full max-w-[14rem] animate-pulse rounded" />
+                        <div className="bg-foreground/10 h-2.5 w-full max-w-[10rem] animate-pulse rounded" />
+                      </div>
+                    </div>
+                  )}
+                {m.role === "assistant" && thoughtSecondsByMessageId[m.id] != null && (
+                  <p className="text-foreground/45 mt-2 border-t border-foreground/10 pt-2 text-xs tabular-nums">
+                    Thought for {thoughtSecondsByMessageId[m.id]} s
+                  </p>
+                )}
               </div>
             </article>
-          ))}
+            );
+          })}
           <div ref={endRef} className="h-px w-full flex-shrink-0" aria-hidden />
         </div>
 
@@ -422,42 +576,100 @@ export function ChatSessionView({ session, onPersist, onFork }: Props) {
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="flex-shrink-0 space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              onChange={(e) => setAttachmentCount(e.target.files?.length ?? 0)}
-              className="text-foreground/80 max-w-full text-sm file:mr-2 file:rounded-lg file:border-0 file:bg-zinc-200 file:px-3 file:py-1.5 file:text-sm file:font-medium dark:file:bg-zinc-800"
-              disabled={busy}
-            />
+        <form onSubmit={onSubmit} onPaste={onPasteFiles} className="flex-shrink-0 space-y-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ATTACHMENT_ACCEPT}
+            tabIndex={-1}
+            onChange={(e) => {
+              const raw = e.target.files ? Array.from(e.target.files) : [];
+              const v = validateFiles(raw);
+              if (raw.length && v === undefined) {
+                e.target.value = "";
+                return;
+              }
+              setAttachments(v ?? []);
+              syncFileInput(v ?? []);
+            }}
+            className="hidden"
+            disabled={busy}
+          />
+          <div className="border-foreground/12 bg-foreground/3 dark:bg-foreground/6 flex flex-col gap-2 rounded-[28px] border px-3 py-2.5 shadow-sm">
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-1 pt-0.5 pb-1">
+                {attachments.map((file, idx) => (
+                  <ComposerAttachmentPreview
+                    key={`${file.name}-${file.size}-${idx}`}
+                    file={file}
+                    disabled={busy}
+                    onRemove={() => removeAttachment(idx)}
+                  />
+                ))}
+              </div>
+            )}
+            <div className="flex items-end gap-1.5">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach images, text, PDF, or spreadsheet files"
+                aria-label="Attach images, text files, PDFs, or spreadsheets"
+                className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                  aria-hidden
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void onSubmit(e);
+                  }
+                }}
+                placeholder="Message…"
+                rows={3}
+                disabled={busy}
+                className="text-foreground placeholder:text-foreground/40 focus:placeholder:text-foreground/25 max-h-48 min-h-[5rem] flex-1 resize-y bg-transparent px-1 py-2.5 text-[15px] leading-relaxed outline-none ring-0 focus:ring-0 disabled:opacity-60"
+              />
+              <button
+                type="submit"
+                disabled={busy || (!input.trim() && attachments.length === 0)}
+                className="bg-foreground text-background hover:opacity-92 mb-0.5 shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Send
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void onSubmit(e);
-                }
-              }}
-              placeholder="Message… (Enter to send, Shift+Enter for newline)"
-              rows={3}
-              disabled={busy}
-              className="border-foreground/15 bg-background text-foreground placeholder:text-foreground/35 focus:ring-foreground/20 max-h-48 min-h-[5.5rem] flex-1 resize-y rounded-xl border px-4 py-3 text-sm outline-none focus:ring-2 disabled:opacity-60"
-            />
-            <button
-              type="submit"
-              disabled={busy || (!input.trim() && attachmentCount === 0)}
-              className="bg-foreground text-background hover:opacity-90 self-end rounded-xl px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Send
-            </button>
-          </div>
+          <p className="text-foreground/40 px-2 text-center text-[11px]">
+            Enter to send · Shift+Enter newline · paste images or supported files from clipboard
+          </p>
         </form>
       </div>
+
+      <ChatSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        draft={settingsDraft}
+        onChangeDraft={(patch) =>
+          setSettingsDraft((prev) => ({ ...prev, ...patch }))
+        }
+        onSave={handleSaveSettings}
+      />
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { z } from "zod";
  */
 const firecrawlWebSearchTool = tool({
   description:
-    "Search the public web for current information. Use when freshness or citations matter.",
+    "Search the public web at most once per user message. Use one query that covers the full question (e.g. include both Brent and WTI if the user asks about oil prices). Answer from results; do not search again in the same turn unless results were empty.",
   inputSchema: z.object({
     query: z.string().describe("Concise web search query"),
   }),

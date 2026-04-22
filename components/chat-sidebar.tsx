@@ -11,7 +11,13 @@ type Props = {
   onDelete: (id: string) => void;
 };
 
-export function ChatSidebar({ sessions, activeId, onSelect, onNew, onDelete }: Props) {
+export function ChatSidebar({
+  sessions,
+  activeId,
+  onSelect,
+  onNew,
+  onDelete,
+}: Props) {
   const router = useRouter();
   const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -23,11 +29,11 @@ export function ChatSidebar({ sessions, activeId, onSelect, onNew, onDelete }: P
 
   return (
     <aside className="border-foreground/10 bg-background flex min-h-0 w-[min(100%,280px)] shrink-0 flex-col border-r">
-      <div className="flex items-center gap-2 border-b border-transparent p-3">
+      <div className="border-b border-transparent p-3">
         <button
           type="button"
           onClick={onNew}
-          className="bg-foreground text-background hover:opacity-90 flex-1 rounded-lg px-3 py-2 text-sm font-semibold"
+          className="bg-foreground text-background hover:opacity-90 w-full rounded-lg px-3 py-2 text-sm font-semibold"
         >
           New chat
         </button>
@@ -46,10 +52,6 @@ export function ChatSidebar({ sessions, activeId, onSelect, onNew, onDelete }: P
               className="min-w-0 flex-1 px-3 py-2 text-left"
             >
               <div className="truncate text-sm font-medium">{s.title}</div>
-              <div className="text-foreground/45 text-xs capitalize">
-                {s.provider === "openai" ? "OpenAI" : "Anthropic"}
-                {s.maxMode ? " · Max" : ""}
-              </div>
             </button>
             <button
               type="button"
