@@ -13,7 +13,7 @@ import { getFirecrawlWebSearchTools } from "@/lib/tools/web-search-firecrawl";
 import { expandInlinedMetadataForModel } from "@/lib/expand-user-message-metadata";
 import { getSystemPrompt } from "@/lib/system-prompt";
 
-export const maxDuration = 120;
+export const maxDuration = 20000;
 
 /** Larger completions when Max mode is enabled in the UI. */
 const OUTPUT_TOKENS_DEFAULT = 8192;
