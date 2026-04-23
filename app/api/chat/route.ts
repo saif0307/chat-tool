@@ -11,6 +11,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import type { ProviderId } from "@/lib/models";
 import { getFirecrawlWebSearchTools } from "@/lib/tools/web-search-firecrawl";
 import { expandInlinedMetadataForModel } from "@/lib/expand-user-message-metadata";
+import { getSystemPrompt } from "@/lib/system-prompt";
 
 export const maxDuration = 120;
 
@@ -162,7 +163,7 @@ export async function POST(req: Request) {
 
   const hasTools = tools !== undefined && Object.keys(tools).length > 0;
 
-  const systemParts: string[] = [];
+  const systemParts: string[] = [getSystemPrompt()];
   if (customInstructions) {
     systemParts.push(
       `User preferences (custom instructions):\n${customInstructions}`,
@@ -172,14 +173,13 @@ export async function POST(req: Request) {
     systemParts.push(searchSystem);
     systemParts.push(SYSTEM_WEB_DIRECT);
   }
-  const combinedSystem =
-    systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
+  const combinedSystem = systemParts.join("\n\n");
 
   const result = streamText({
     model: languageModel,
     messages: modelMessages,
     maxOutputTokens,
-    ...(combinedSystem ? { system: combinedSystem } : {}),
+    system: combinedSystem,
     ...(hasTools && tools
       ? {
           tools,
