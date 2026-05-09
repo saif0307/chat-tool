@@ -1,5 +1,7 @@
 "use client";
 
+import { useCallback, useState } from "react";
+
 export type LooseToolPart = {
   type: string;
   state?: string;
@@ -23,6 +25,65 @@ function Spinner() {
   );
 }
 
+function FalMediaToolbar({ url, kind }: { url: string; kind: "image" | "video" }) {
+  const [busy, setBusy] = useState(false);
+
+  const download = useCallback(async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("fetch failed");
+      const blob = await res.blob();
+      const ext =
+        kind === "video"
+          ? blob.type.includes("webm")
+            ? "webm"
+            : "mp4"
+          : blob.type.includes("png")
+            ? "png"
+            : blob.type.includes("webp")
+              ? "webp"
+              : blob.type.includes("gif")
+                ? "gif"
+                : "jpg";
+      const name = kind === "video" ? `video.${ext}` : `image.${ext}`;
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } finally {
+      setBusy(false);
+    }
+  }, [url, kind]);
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void download()}
+        className="border-violet-500/40 bg-violet-500/15 text-violet-950 hover:bg-violet-500/25 dark:text-violet-100 rounded-md border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {busy ? "Downloading…" : "Download"}
+      </button>
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="text-sm font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900 dark:text-violet-400 dark:hover:text-violet-300"
+      >
+        Open in new tab
+      </a>
+    </div>
+  );
+}
+
 export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
   const title = labelFromType(part.type);
   const query =
@@ -30,8 +91,22 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
       ? String((part.input as { query?: unknown }).query ?? "")
       : "";
 
+  const workspaceRelPath =
+    part.input && typeof part.input === "object" && part.input !== null && "relativePath" in part.input
+      ? String((part.input as { relativePath?: unknown }).relativePath ?? "")
+      : "";
+
   const isWebSearch =
     part.type.includes("web_search") || part.type === "tool-web_search";
+
+  const isWriteWorkspace =
+    part.type.includes("write_workspace_file") ||
+    part.type === "tool-write_workspace_file";
+
+  const isFalImage =
+    part.type.includes("generate_image") || part.type === "tool-generate_image";
+  const isFalVideo =
+    part.type.includes("generate_video") || part.type === "tool-generate_video";
 
   if (part.state === "output-error" || part.errorText) {
     return (
@@ -65,7 +140,13 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
           : `Preparing ${title}…`
         : isWebSearch
           ? "Searching the web…"
-          : `Calling ${title}…`;
+          : isWriteWorkspace
+            ? "Preparing file…"
+            : isFalImage
+              ? "Creating image…"
+              : isFalVideo
+                ? "Rendering video…"
+                : `Calling ${title}…`;
     return (
       <div className="border-sky-500/30 bg-sky-500/[0.07] mb-3 flex gap-3 rounded-lg border px-3 py-2.5 text-sm shadow-sm">
         <Spinner />
@@ -75,6 +156,8 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
             <div className="text-foreground/65 mt-1 font-mono text-xs leading-snug">
               Query: “{query}”
             </div>
+          ) : workspaceRelPath ? (
+            <div className="text-foreground/55 mt-1 text-xs">Almost ready…</div>
           ) : (
             <div className="text-foreground/55 mt-0.5 animate-pulse text-xs">Gathering arguments…</div>
           )}
@@ -86,8 +169,78 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
   if (part.state === "output-available" && part.output) {
     const out = part.output as {
       query?: string;
+      relativePath?: string;
+      bytesWritten?: number;
+      downloadUrlPath?: string;
       results?: Array<{ rank?: number; title?: string; url?: string; snippet?: string }>;
     };
+
+    const falUrl =
+      typeof (out as { mediaUrl?: unknown }).mediaUrl === "string"
+        ? (out as { mediaUrl: string }).mediaUrl
+        : "";
+    const falKind = (out as { mediaKind?: unknown }).mediaKind;
+
+    if (
+      falUrl &&
+      (falKind === "image" || falKind === "video" || isFalImage || isFalVideo)
+    ) {
+      const kind = falKind === "video" || isFalVideo ? "video" : "image";
+      const caption =
+        typeof (out as { caption?: unknown }).caption === "string"
+          ? (out as { caption: string }).caption
+          : "";
+      return (
+        <div className="border-violet-500/30 bg-violet-500/[0.06] mb-3 overflow-hidden rounded-lg border shadow-sm">
+          <div className="text-foreground border-violet-500/20 border-b px-3 py-2 text-sm font-medium">
+            {kind === "video" ? "Video" : "Image"} ready
+          </div>
+          <div className="px-3 pb-3 pt-2">
+            {kind === "video" ? (
+              <video
+                src={falUrl}
+                controls
+                playsInline
+                className="bg-foreground/5 max-h-[min(70vh,520px)] w-full rounded-lg"
+                preload="metadata"
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element -- fal CDN URL is dynamic per generation
+              <img
+                src={falUrl}
+                alt={caption || "Generated image"}
+                className="bg-foreground/5 max-h-[min(70vh,520px)] w-full rounded-lg object-contain"
+              />
+            )}
+            <FalMediaToolbar url={falUrl} kind={kind} />
+          </div>
+        </div>
+      );
+    }
+
+    if (isWriteWorkspace && typeof out.relativePath === "string") {
+      const href = out.downloadUrlPath ?? "";
+      const base =
+        out.relativePath.includes("/") ? out.relativePath.split("/").pop() : out.relativePath;
+      const downloadName = base && base.length > 0 ? base : "download";
+      return (
+        <div className="border-emerald-500/30 bg-emerald-500/[0.07] mb-3 rounded-lg border px-3 py-2.5 text-sm shadow-sm">
+          <div className="text-foreground mb-1 text-sm font-medium">Ready to download</div>
+          <div className="text-foreground/80 text-[13px]">{downloadName}</div>
+          {href ? (
+            <a
+              href={href}
+              download={downloadName}
+              className="mt-2 inline-block font-medium text-emerald-800 underline underline-offset-2 hover:text-emerald-900 dark:text-emerald-400 dark:hover:text-emerald-300"
+              rel="noreferrer noopener"
+            >
+              Download
+            </a>
+          ) : null}
+        </div>
+      );
+    }
+
     const rows = out.results ?? [];
     if (rows.length > 0) {
       return (
@@ -126,7 +279,7 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
     return (
       <details className="border-foreground/12 bg-foreground/[0.03] mb-3 rounded-lg border px-3 py-2 text-sm">
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-foreground/65">
-          Web search (details)
+          {isWriteWorkspace ? "Details" : "Web search (details)"}
         </summary>
         <pre className="text-foreground/75 mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
           {JSON.stringify(out, null, 2).slice(0, 8000)}
@@ -147,7 +300,15 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
         <Spinner />
         <div className="min-w-0">
           <div className="text-foreground font-medium">
-            {isWebSearch ? "Fetching web results…" : `${title}…`}
+            {isWebSearch
+              ? "Fetching web results…"
+              : isWriteWorkspace
+                ? "Working on your file…"
+                : isFalImage
+                  ? "Creating image…"
+                  : isFalVideo
+                    ? "Rendering video…"
+                    : `${title}…`}
           </div>
           {query ? (
             <div className="text-foreground/65 mt-1 text-xs">“{query}”</div>
@@ -161,7 +322,17 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
     <div className="border-foreground/12 bg-foreground/[0.03] text-foreground/75 mb-2 flex gap-2 rounded-lg border px-3 py-2 text-sm">
       <Spinner />
       <span>
-        <span className="font-medium">{isWebSearch ? "Web search" : title}</span>
+        <span className="font-medium">
+          {isWebSearch
+            ? "Web search"
+            : isWriteWorkspace
+              ? "File"
+              : isFalImage
+                ? "Image"
+                : isFalVideo
+                  ? "Video"
+                  : title}
+        </span>
         {query ? ` · “${query}”` : null} — starting…
       </span>
     </div>

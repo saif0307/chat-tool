@@ -4,12 +4,14 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import "highlight.js/styles/github-dark.css";
+import { sanitizeAssistantMarkdown } from "@/lib/sanitize-assistant-markdown";
 
 type Props = {
   content: string;
 };
 
 export function MarkdownMessage({ content }: Props) {
+  const safeContent = sanitizeAssistantMarkdown(content);
   return (
     <div className="markdown-body min-w-0 max-w-full break-words text-[15px] leading-relaxed [overflow-wrap:anywhere]">
       <ReactMarkdown
@@ -88,7 +90,7 @@ export function MarkdownMessage({ content }: Props) {
           },
         }}
       >
-        {content}
+        {safeContent}
       </ReactMarkdown>
     </div>
   );

@@ -291,6 +291,28 @@ export function ChatSessionView({
     }
   }, []);
 
+  const copyUserMessage = useCallback(async (m: UIMessage) => {
+    if (m.role !== "user") return;
+    const inlinedMeta = (m.metadata as UserMessageMetadata | undefined)?.inlinedForModel;
+    const fileNames = m.parts.flatMap((p) =>
+      p.type === "file" && p.filename ? [p.filename] : [],
+    );
+    const raw = m.parts
+      .filter((p) => p.type === "text")
+      .map((p) => (p as { text?: string }).text ?? "")
+      .join("\n\n");
+    const visible = visibleUserMessageText(raw, inlinedMeta, fileNames);
+    const text = (visible ?? raw).trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(m.id);
+      window.setTimeout(() => setCopiedId((id) => (id === m.id ? null : id)), 2000);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const handleSaveSettings = useCallback(() => {
     onAppSettingsChange(
       normalizeAppChatSettings({
@@ -450,6 +472,16 @@ export function ChatSessionView({
                   >
                     Fork here
                   </button>
+                  {m.role === "user" && (
+                    <button
+                      type="button"
+                      title="Copy message"
+                      onClick={() => void copyUserMessage(m)}
+                      className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 rounded-md border px-2 py-1 text-xs font-medium"
+                    >
+                      {copiedId === m.id ? "Copied" : "Copy"}
+                    </button>
+                  )}
                   {m.role === "assistant" && (
                     <button
                       type="button"

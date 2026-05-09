@@ -20,6 +20,9 @@
 # production
 /build
 
+# AI workspace file output (see write_workspace_file tool)
+/generated
+
 # misc
 .DS_Store
 *.pem
