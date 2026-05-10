@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { MarkdownMessage } from "@/components/markdown-message";
 import { DraftArtifactCard } from "@/components/draft-artifact-card";
 import { splitDraftArtifact } from "@/lib/draft-artifact-parse";
@@ -10,7 +11,10 @@ type Props = {
   isStreaming: boolean;
 };
 
-export function AssistantMessageBody({ text, isStreaming }: Props) {
+export const AssistantMessageBody = memo(function AssistantMessageBody({
+  text,
+  isStreaming,
+}: Props) {
   const { intro, draft } = splitDraftArtifact(text);
 
   const showIntro = intro.trim().length > 0;
@@ -20,7 +24,7 @@ export function AssistantMessageBody({ text, isStreaming }: Props) {
   return (
     <div className="flex flex-col gap-1">
       {showIntro ? (
-        <MarkdownMessage content={intro} />
+        <MarkdownMessage content={intro} streaming={isStreaming} />
       ) : null}
       {showDraft && draft ? (
         <DraftArtifactCard
@@ -31,4 +35,4 @@ export function AssistantMessageBody({ text, isStreaming }: Props) {
       ) : null}
     </div>
   );
-}
+});

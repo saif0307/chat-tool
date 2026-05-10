@@ -5,6 +5,7 @@ import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -46,6 +47,16 @@ import {
 
 const MAX_ATTACH_BYTES = 12 * 1024 * 1024;
 const MAX_ATTACH_FILES = 8;
+
+/** Extra scrollable space below the last message so content clears the overlaid composer. */
+const COMPOSER_SCROLL_GAP_PX = 28;
+
+/** Pixels from scroll bottom to treat as “pinned” for follow-mode (chat UX). */
+const PIN_TO_BOTTOM_THRESHOLD_PX = 72;
+
+function distanceFromBottom(el: HTMLElement): number {
+  return el.scrollHeight - el.scrollTop - el.clientHeight;
+}
 
 /** True when the assistant bubble has something visible (text, reasoning, tools, files). */
 function assistantHasRenderableContent(m: UIMessage): boolean {
@@ -161,6 +172,8 @@ export function ChatSessionView({
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  /** When true, assistant streaming / layout growth keeps the viewport snapped to the newest content. */
+  const stickToBottomRef = useRef(true);
 
   /** Match `max-h-[min(70vh,28rem)]` — do not use getComputedStyle(maxHeight); `min()` often breaks parseFloat. */
   const getComposerTextareaMaxPx = useCallback(() => {
@@ -189,21 +202,32 @@ export function ChatSessionView({
       window.removeEventListener("resize", adjustComposerTextareaHeight);
   }, [adjustComposerTextareaHeight]);
 
-  useLayoutEffect(() => {
+  const applyComposerBottomInset = useCallback(() => {
     const scrollEl = messagesScrollRef.current;
     const dockEl = composerDockRef.current;
     if (!scrollEl || !dockEl) return;
+    const h =
+      Math.ceil(dockEl.getBoundingClientRect().height) + COMPOSER_SCROLL_GAP_PX;
+    const next = `${h}px`;
+    if (scrollEl.style.paddingBottom !== next) {
+      scrollEl.style.paddingBottom = next;
+    }
+  }, []);
 
-    const syncScrollPadding = () => {
-      const h = dockEl.getBoundingClientRect().height;
-      scrollEl.style.paddingBottom = `${Math.ceil(h)}px`;
-    };
-
-    syncScrollPadding();
-    const ro = new ResizeObserver(syncScrollPadding);
+  useLayoutEffect(() => {
+    applyComposerBottomInset();
+    const dockEl = composerDockRef.current;
+    if (!dockEl) return;
+    const ro = new ResizeObserver(() => {
+      applyComposerBottomInset();
+      const scrollEl = messagesScrollRef.current;
+      if (scrollEl && stickToBottomRef.current) {
+        scrollEl.scrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
+      }
+    });
     ro.observe(dockEl);
     return () => ro.disconnect();
-  }, []);
+  }, [applyComposerBottomInset]);
 
   const effectiveModel = useMemo(
     () =>
@@ -249,6 +273,11 @@ export function ChatSessionView({
 
   const busy = status === "streaming" || status === "submitted";
 
+  /** Lets React interrupt paint during rapid stream chunks (Concurrent Features). */
+  const deferredMessages = useDeferredValue(messages);
+  const renderMessages = busy ? deferredMessages : messages;
+  const lastMessageId = messages.at(-1)?.id;
+
   const generationStartedAtRef = useRef<number | null>(null);
   const [thoughtSecondsByMessageId, setThoughtSecondsByMessageId] = useState<
     Record<string, number>
@@ -275,8 +304,30 @@ export function ChatSessionView({
   }, [status, messages]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, status]);
+    const scrollEl = messagesScrollRef.current;
+    if (!scrollEl) return;
+    const onScroll = () => {
+      stickToBottomRef.current =
+        distanceFromBottom(scrollEl) <= PIN_TO_BOTTOM_THRESHOLD_PX;
+    };
+    scrollEl.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => scrollEl.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useLayoutEffect(() => {
+    applyComposerBottomInset();
+    const scrollEl = messagesScrollRef.current;
+    if (!scrollEl || !stickToBottomRef.current) return;
+    const snapToBottom = () => {
+      scrollEl.scrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
+    };
+    snapToBottom();
+    requestAnimationFrame(() => {
+      applyComposerBottomInset();
+      snapToBottom();
+    });
+  }, [messages, status, renderMessages, applyComposerBottomInset]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -371,6 +422,8 @@ export function ChatSessionView({
       e.preventDefault();
       const text = input.trim();
       if ((!text && !attachments.length) || busy) return;
+
+      stickToBottomRef.current = true;
 
       const prepared = await prepareAttachmentsForModel(attachments, text);
       if (prepared.error) {
@@ -550,7 +603,7 @@ export function ChatSessionView({
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           ref={messagesScrollRef}
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-4 pt-4 pr-1"
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-4 pt-4 pr-1 [scrollbar-gutter:stable]"
         >
           {messages.length === 0 && (
             <div className="text-foreground/55 flex flex-col items-center justify-center gap-3 px-4 py-12 text-center">
@@ -573,7 +626,7 @@ export function ChatSessionView({
               </p>
             </div>
           )}
-          {messages.map((m, idx) => {
+          {renderMessages.map((m, idx) => {
             const inlinedMeta =
               m.role === "user"
                 ? (m.metadata as UserMessageMetadata | undefined)
@@ -586,7 +639,7 @@ export function ChatSessionView({
                   )
                 : [];
             const isStreamingAssistant =
-              busy && messages.at(-1)?.id === m.id && m.role === "assistant";
+              busy && lastMessageId === m.id && m.role === "assistant";
 
             return (
               <div key={m.id} className="flex w-full justify-center">
@@ -604,226 +657,246 @@ export function ChatSessionView({
                         : "border-foreground/10 w-full border bg-white shadow-sm dark:bg-[#2f2f2f]"
                     }`}
                   >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-foreground/45 text-xs font-medium uppercase tracking-wide">
-                    {m.role === "user" ? "You" : "Assistant"}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      title="Fork here"
-                      aria-label="Fork here · new chat from this message"
-                      onClick={() => forkHere(idx)}
-                      className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-4 w-4"
-                        aria-hidden
-                      >
-                        <circle cx="12" cy="18" r="3" />
-                        <circle cx="6" cy="6" r="3" />
-                        <circle cx="18" cy="6" r="3" />
-                        <path d="M18 9v1a3 3 0 0 1-3 3h-6a3 3 0 0 0-3 3v1" />
-                        <path d="M12 13v5" />
-                      </svg>
-                    </button>
-                    {m.role === "user" && (
-                      <button
-                        type="button"
-                        title={copiedId === m.id ? "Copied" : "Copy message"}
-                        aria-label={
-                          copiedId === m.id ? "Copied to clipboard" : "Copy message"
-                        }
-                        onClick={() => void copyUserMessage(m)}
-                        className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
-                      >
-                        {copiedId === m.id ? (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-4 w-4"
-                            aria-hidden
-                          >
-                            <path d="M20 6 9 17l-5-5" />
-                          </svg>
-                        ) : (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-4 w-4"
-                            aria-hidden
-                          >
-                            <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
-                            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                          </svg>
-                        )}
-                      </button>
-                    )}
-                    {m.role === "assistant" && (
-                      <button
-                        type="button"
-                        title={copiedId === m.id ? "Copied" : "Copy response"}
-                        aria-label={
-                          copiedId === m.id
-                            ? "Copied to clipboard"
-                            : "Copy response"
-                        }
-                        onClick={() => void copyResponse(m)}
-                        className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
-                      >
-                        {copiedId === m.id ? (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-4 w-4"
-                            aria-hidden
-                          >
-                            <path d="M20 6 9 17l-5-5" />
-                          </svg>
-                        ) : (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-4 w-4"
-                            aria-hidden
-                          >
-                            <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
-                            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                          </svg>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  {m.parts.map((part, i) => {
-                    if (part.type === "reasoning") {
-                      const reasoningText = part.text;
-                      if (!reasoningText) return null;
-                      return (
-                        <details
-                          key={`${m.id}-reasoning-${i}`}
-                          className="text-foreground/65 bg-foreground/5 mb-2 rounded-lg border border-dashed px-3 py-2 text-sm"
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-foreground/45 text-xs font-medium uppercase tracking-wide">
+                        {m.role === "user" ? "You" : "Assistant"}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          title="Fork here"
+                          aria-label="Fork here · new chat from this message"
+                          onClick={() => forkHere(idx)}
+                          className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
                         >
-                          <summary className="cursor-pointer select-none text-xs font-medium">
-                            Reasoning
-                          </summary>
-                          <pre className="mt-2 whitespace-pre-wrap font-mono text-[13px] leading-relaxed">
-                            {reasoningText}
-                          </pre>
-                        </details>
-                      );
-                    }
-                    if (part.type === "file") {
-                      return (
-                        <MessageAttachmentPart
-                          key={`${m.id}-file-${i}`}
-                          url={part.url}
-                          filename={part.filename}
-                          mediaType={part.mediaType}
-                        />
-                      );
-                    }
-                    if (
-                      typeof part.type === "string" &&
-                      part.type.startsWith("tool-")
-                    ) {
-                      return (
-                        <ToolInvocationCard
-                          key={`${m.id}-tool-${i}`}
-                          part={part as LooseToolPart}
-                        />
-                      );
-                    }
-                    if (part.type === "text") {
-                      const text = part.text;
-                      if (m.role === "user") {
-                        const visible = visibleUserMessageText(
-                          text,
-                          inlinedMeta,
-                          fileAttachmentNames,
-                        );
-                        if (!visible) return null;
-                        return (
-                          <div key={`${m.id}-text-${i}`}>
-                            <CollapsibleUserMessageText text={visible} />
-                          </div>
-                        );
-                      }
-                      if (!text?.trim()) return null;
-                      return (
-                        <div key={`${m.id}-text-${i}`}>
-                          <AssistantMessageBody
-                            text={text}
-                            isStreaming={isStreamingAssistant}
-                          />
-                        </div>
-                      );
-                    }
-                    return null;
-                  })}
-                  {inlinedMeta && inlinedMeta.length > 0 ? (
-                    <UserInlinedAttachments items={inlinedMeta} />
-                  ) : null}
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="h-4 w-4"
+                            aria-hidden
+                          >
+                            <circle cx="12" cy="18" r="3" />
+                            <circle cx="6" cy="6" r="3" />
+                            <circle cx="18" cy="6" r="3" />
+                            <path d="M18 9v1a3 3 0 0 1-3 3h-6a3 3 0 0 0-3 3v1" />
+                            <path d="M12 13v5" />
+                          </svg>
+                        </button>
+                        {m.role === "user" && (
+                          <button
+                            type="button"
+                            title={
+                              copiedId === m.id ? "Copied" : "Copy message"
+                            }
+                            aria-label={
+                              copiedId === m.id
+                                ? "Copied to clipboard"
+                                : "Copy message"
+                            }
+                            onClick={() => void copyUserMessage(m)}
+                            className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
+                          >
+                            {copiedId === m.id ? (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                                aria-hidden
+                              >
+                                <path d="M20 6 9 17l-5-5" />
+                              </svg>
+                            ) : (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                                aria-hidden
+                              >
+                                <rect
+                                  width="8"
+                                  height="4"
+                                  x="8"
+                                  y="2"
+                                  rx="1"
+                                  ry="1"
+                                />
+                                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                              </svg>
+                            )}
+                          </button>
+                        )}
+                        {m.role === "assistant" && (
+                          <button
+                            type="button"
+                            title={
+                              copiedId === m.id ? "Copied" : "Copy response"
+                            }
+                            aria-label={
+                              copiedId === m.id
+                                ? "Copied to clipboard"
+                                : "Copy response"
+                            }
+                            onClick={() => void copyResponse(m)}
+                            className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
+                          >
+                            {copiedId === m.id ? (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                                aria-hidden
+                              >
+                                <path d="M20 6 9 17l-5-5" />
+                              </svg>
+                            ) : (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                                aria-hidden
+                              >
+                                <rect
+                                  width="8"
+                                  height="4"
+                                  x="8"
+                                  y="2"
+                                  rx="1"
+                                  ry="1"
+                                />
+                                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                              </svg>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      {m.parts.map((part, i) => {
+                        if (part.type === "reasoning") {
+                          const reasoningText = part.text;
+                          if (!reasoningText) return null;
+                          return (
+                            <details
+                              key={`${m.id}-reasoning-${i}`}
+                              className="text-foreground/65 bg-foreground/5 mb-2 rounded-lg border border-dashed px-3 py-2 text-sm"
+                            >
+                              <summary className="cursor-pointer select-none text-xs font-medium">
+                                Reasoning
+                              </summary>
+                              <pre className="mt-2 whitespace-pre-wrap font-mono text-[13px] leading-relaxed">
+                                {reasoningText}
+                              </pre>
+                            </details>
+                          );
+                        }
+                        if (part.type === "file") {
+                          return (
+                            <MessageAttachmentPart
+                              key={`${m.id}-file-${i}`}
+                              url={part.url}
+                              filename={part.filename}
+                              mediaType={part.mediaType}
+                            />
+                          );
+                        }
+                        if (
+                          typeof part.type === "string" &&
+                          part.type.startsWith("tool-")
+                        ) {
+                          return (
+                            <ToolInvocationCard
+                              key={`${m.id}-tool-${i}`}
+                              part={part as LooseToolPart}
+                            />
+                          );
+                        }
+                        if (part.type === "text") {
+                          const text = part.text;
+                          if (m.role === "user") {
+                            const visible = visibleUserMessageText(
+                              text,
+                              inlinedMeta,
+                              fileAttachmentNames,
+                            );
+                            if (!visible) return null;
+                            return (
+                              <div key={`${m.id}-text-${i}`}>
+                                <CollapsibleUserMessageText text={visible} />
+                              </div>
+                            );
+                          }
+                          if (!text?.trim()) return null;
+                          return (
+                            <div key={`${m.id}-text-${i}`}>
+                              <AssistantMessageBody
+                                text={text}
+                                isStreaming={isStreamingAssistant}
+                              />
+                            </div>
+                          );
+                        }
+                        return null;
+                      })}
+                      {inlinedMeta && inlinedMeta.length > 0 ? (
+                        <UserInlinedAttachments items={inlinedMeta} />
+                      ) : null}
                   {m.role === "assistant" &&
                     busy &&
-                    messages.at(-1)?.id === m.id &&
+                    lastMessageId === m.id &&
                     !assistantHasRenderableContent(m) && (
-                      <div
-                        className="text-foreground/60 mt-1 flex items-center gap-3 py-2"
-                        aria-live="polite"
-                        aria-busy="true"
-                      >
-                        <span
-                          className="border-foreground/35 inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-t-sky-500"
-                          aria-hidden
-                        />
-                        <div className="flex min-w-0 flex-1 flex-col gap-2">
-                          <div className="bg-foreground/12 h-2.5 w-full max-w-[14rem] animate-pulse rounded" />
-                          <div className="bg-foreground/10 h-2.5 w-full max-w-[10rem] animate-pulse rounded" />
-                        </div>
-                      </div>
-                    )}
-                  {m.role === "assistant" &&
-                    thoughtSecondsByMessageId[m.id] != null && (
-                      <p className="text-foreground/45 mt-2 border-t border-foreground/10 pt-2 text-xs tabular-nums">
-                        Thought for {thoughtSecondsByMessageId[m.id]} s
-                      </p>
-                    )}
-                </div>
+                          <div
+                            className="text-foreground/60 mt-1 flex items-center gap-3 py-2"
+                            aria-live="polite"
+                            aria-busy="true"
+                          >
+                            <span
+                              className="border-foreground/35 inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-t-sky-500"
+                              aria-hidden
+                            />
+                            <div className="flex min-w-0 flex-1 flex-col gap-2">
+                              <div className="bg-foreground/12 h-2.5 w-full max-w-[14rem] animate-pulse rounded" />
+                              <div className="bg-foreground/10 h-2.5 w-full max-w-[10rem] animate-pulse rounded" />
+                            </div>
+                          </div>
+                        )}
+                      {m.role === "assistant" &&
+                        thoughtSecondsByMessageId[m.id] != null && (
+                          <p className="text-foreground/45 mt-2 border-t border-foreground/10 pt-2 text-xs tabular-nums">
+                            Thought for {thoughtSecondsByMessageId[m.id]} s
+                          </p>
+                        )}
+                    </div>
                   </article>
                 </div>
               </div>
             );
           })}
-          <div ref={endRef} className="h-px w-full flex-shrink-0" aria-hidden />
+          <div ref={endRef} className="h-3 w-full shrink-0" aria-hidden />
         </div>
 
         <div

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { DraftArtifactFormat } from "@/lib/draft-artifact-parse";
 import { MarkdownMessage } from "@/components/markdown-message";
 
@@ -24,34 +24,29 @@ function formatTitle(format: DraftArtifactFormat): string {
 
 export function DraftArtifactCard({ body, format, streaming }: Props) {
   const [editing, setEditing] = useState(false);
-  const [edited, setEdited] = useState(body);
-  /** Full rendered preview height so Edit mode does not shrink vs Markdown/pre view. */
+  /** Only used while editing — never synced from props on every token (avoids setState-per-chunk loops). */
+  const [edited, setEdited] = useState("");
   const [editMinHeightPx, setEditMinHeightPx] = useState<number | undefined>(
     undefined,
   );
   const previewRef = useRef<HTMLDivElement>(null);
-  const editingRef = useRef(editing);
-  editingRef.current = editing;
-
-  // Sync when `body` streams in from the assistant; skip while editing so Done does not wipe local edits.
-  useEffect(() => {
-    if (!editingRef.current) setEdited(body);
-  }, [body]);
 
   const displayTitle = formatTitle(format);
 
   const copyText = async () => {
+    const text = editing ? edited : body;
     try {
-      await navigator.clipboard.writeText(edited);
+      await navigator.clipboard.writeText(text);
     } catch {
       /* ignore */
     }
   };
 
   const shareText = async () => {
+    const text = editing ? edited : body;
     try {
       if (navigator.share) {
-        await navigator.share({ title: displayTitle, text: edited });
+        await navigator.share({ title: displayTitle, text });
       } else {
         await copyText();
       }
@@ -74,6 +69,7 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
       setEditMinHeightPx(
         el != null ? Math.max(el.scrollHeight, 192) : undefined,
       );
+      setEdited(body);
       setEditing(true);
     });
   }
@@ -181,11 +177,11 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
             {format === "plain" ? (
               <div className="markdown-body text-[15px] leading-relaxed">
                 <pre className="font-sans wrap-anywhere whitespace-pre-wrap text-[15px] leading-relaxed">
-                  {edited}
+                  {body}
                 </pre>
               </div>
             ) : (
-              <MarkdownMessage content={edited} />
+              <MarkdownMessage content={body} streaming={streaming} />
             )}
           </div>
         )}
