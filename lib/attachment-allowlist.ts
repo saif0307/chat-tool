@@ -75,6 +75,76 @@ const ALLOWED_EXTENSIONS = new Set([
   "xlsx",
   "xlsm",
   "ods",
+  // common plain-text / source (not exhaustive)
+  "py",
+  "pyw",
+  "pyi",
+  "rb",
+  "gemspec",
+  "go",
+  "rs",
+  "java",
+  "c",
+  "cc",
+  "cxx",
+  "cpp",
+  "h",
+  "hh",
+  "hpp",
+  "cs",
+  "fs",
+  "fsx",
+  "vb",
+  "php",
+  "phtml",
+  "kt",
+  "kts",
+  "swift",
+  "r",
+  "pl",
+  "pm",
+  "scala",
+  "sc",
+  "sbt",
+  "clj",
+  "cljs",
+  "edn",
+  "hs",
+  "lhs",
+  "ml",
+  "mli",
+  "erl",
+  "hrl",
+  "ex",
+  "exs",
+  "nim",
+  "dart",
+  "lua",
+  "ps1",
+  "psc",
+  "gradle",
+  "properties",
+  "proto",
+  "graphql",
+  "gql",
+  "prisma",
+  "mdx",
+  "bib",
+  "adoc",
+  "asciidoc",
+]);
+
+/** Lowercase basename only — extensionless project files that are text. */
+const ALLOWED_BASE_NAMES = new Set([
+  "dockerfile",
+  "makefile",
+  "gemfile",
+  "rakefile",
+  "rakefile.rb",
+  "procfile",
+  "jenkinsfile",
+  "snakefile",
+  "containerfile",
 ]);
 
 export function extensionFromFilename(name: string): string {
@@ -88,6 +158,10 @@ export function isAllowedAttachment(file: File): boolean {
   if (rawType.startsWith("image/")) return true;
   if (rawType && ALLOWED_TEXT_AND_DATA_TYPES.has(rawType)) return true;
 
+  const base =
+    file.name.split(/[/\\]/).pop()?.toLowerCase().trim() ?? "";
+  if (base && ALLOWED_BASE_NAMES.has(base)) return true;
+
   const ext = extensionFromFilename(file.name);
   if (ext && ALLOWED_EXTENSIONS.has(ext)) return true;
 
@@ -96,4 +170,4 @@ export function isAllowedAttachment(file: File): boolean {
 
 /** For `<input type="file" accept="…">` — hints only; always validate with `isAllowedAttachment`. */
 export const ATTACHMENT_ACCEPT =
-  "image/*,.pdf,.txt,.md,.markdown,.json,.csv,.tsv,.xml,.yaml,.yml,.html,.htm,.sql,.log,.xlsx,.xls,.xlsm,.ods";
+  "image/*,.pdf,.txt,.md,.markdown,.json,.csv,.tsv,.xml,.yaml,.yml,.html,.htm,.css,.sql,.log,.xlsx,.xls,.xlsm,.ods,.py,.go,.rs,.java,.c,.cpp,.h,.cs,.php,.kt,.swift,.rb,.scala,.dart,.graphql,.proto";

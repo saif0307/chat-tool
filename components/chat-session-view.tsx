@@ -461,6 +461,37 @@ export function ChatSessionView({
     [busy, mergeIntoFileInput],
   );
 
+  const hasFilePayload = (dt: DataTransfer | null) =>
+    dt != null && [...dt.types].includes("Files");
+
+  const onDragEnterChat = useCallback(
+    (e: React.DragEvent) => {
+      if (busy || !hasFilePayload(e.dataTransfer)) return;
+      e.preventDefault();
+    },
+    [busy],
+  );
+
+  const onDragOverChat = useCallback(
+    (e: React.DragEvent) => {
+      if (busy || !hasFilePayload(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    [busy],
+  );
+
+  const onDropFiles = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (busy) return;
+      const list = e.dataTransfer.files;
+      if (!list?.length) return;
+      mergeIntoFileInput(Array.from(list));
+    },
+    [busy, mergeIntoFileInput],
+  );
+
   const onSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -568,7 +599,12 @@ export function ChatSessionView({
   );
 
   return (
-    <div className="bg-zinc-50 dark:bg-background flex min-h-0 min-w-0 flex-1 flex-col">
+    <div
+      className="bg-zinc-50 dark:bg-background flex min-h-0 min-w-0 flex-1 flex-col"
+      onDragEnter={onDragEnterChat}
+      onDragOver={onDragOverChat}
+      onDrop={onDropFiles}
+    >
       <header className="border-foreground/10 flex flex-shrink-0 flex-wrap items-start gap-3 border-b px-4 py-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-foreground truncate text-lg font-semibold tracking-tight">
