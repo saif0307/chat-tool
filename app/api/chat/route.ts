@@ -81,9 +81,9 @@ const SYSTEM_WORKSPACE_FILES = [
 
 /** In-chat draft viewer — model fences drafts so the UI can show Edit / Copy / Share. */
 const SYSTEM_DRAFT_ARTIFACT = [
-  "Draft viewer (emails, letters, long markdown documents):",
-  "- For brief, routine messages that fit in a normal reply (e.g. a same-day sick note, short thank-you), put the text directly in the message—do not wrap them in [[[BEGIN DRAFT]]] … [[[END DRAFT]]].",
-  "- Use [[[BEGIN DRAFT]]] … [[[END DRAFT]]] when the body is long, multi-section, or would clearly benefit from in-app draft tools—not for every formal snippet.",
+  "Draft viewer (emails, letters, paste-ready documents):",
+  "- When the user asks for an email, letter, formal message, or any prose they will copy or send, fence that body with [[[BEGIN DRAFT]]] … [[[END DRAFT]]] (sick leave, thank-you, resignation, cover letter, etc.)—including a single concise letter. One fenced draft is enough; align with response balance (one version, not three templates).",
+  "- Skip the fence only when there is no reusable document (pure Q&A, brainstorming without paste-ready text, or a trivial one-line reply they will not treat as a letter).",
   "- Put a short intro outside the fence if helpful, then fence only the draft using these exact bracket lines (they must not be altered): [[[BEGIN DRAFT]]] … [[[END DRAFT]]].",
   "- Optional kind on the opening line: [[[BEGIN DRAFT email]]], [[[BEGIN DRAFT markdown]]], or [[[BEGIN DRAFT plain]]]. Default is fine when unspecified.",
 ].join("\n");
