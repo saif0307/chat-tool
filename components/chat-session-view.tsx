@@ -25,6 +25,7 @@ import {
   ComposerAttachmentPreview,
   MessageAttachmentPart,
 } from "@/components/attachment-display";
+import { ComposerPastedSnippetPreview } from "@/components/composer-pasted-snippet";
 import {
   ATTACHMENT_ACCEPT,
   isAllowedAttachment,
@@ -107,6 +108,35 @@ function filesFromClipboard(data: DataTransfer | null): File[] {
   return Array.from(data.files);
 }
 
+type PastedSnippet = { id: string; text: string };
+
+/**
+ * Detect paste from a code editor / file buffer vs a plain browser field.
+ * Editors (VS Code, Cursor, JetBrains, etc.) usually put extra MIME types on the clipboard:
+ * at minimum `text/html` next to `text/plain` (syntax-highlighted HTML). Copying from a normal
+ * `<input>` / `<textarea>` in the browser is almost always `text/plain` only.
+ * Some builds also register custom types whose names include `vscode` or similar.
+ */
+function clipboardLooksLikeEditorPaste(data: DataTransfer): boolean {
+  const types = [...data.types];
+  if (types.length === 0) return false;
+  const lower = types.map((t) => t.toLowerCase());
+
+  if (
+    lower.some((t) =>
+      /vscode|vscode-editor|cursor-editor|jetbrains|android-studio/.test(t),
+    )
+  ) {
+    return true;
+  }
+
+  if (lower.includes("text/html")) {
+    return true;
+  }
+
+  return false;
+}
+
 const USER_MESSAGE_COLLAPSE_CHARS = 380;
 const USER_MESSAGE_COLLAPSE_NEWLINES = 7;
 
@@ -180,6 +210,7 @@ export function ChatSessionView({
   const [input, setInput] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [pastedSnippets, setPastedSnippets] = useState<PastedSnippet[]>([]);
   /** False while user reads older messages — use live `messages` (no defer) for stable scroll. */
   const [followingStream, setFollowingStream] = useState(true);
 
@@ -214,7 +245,12 @@ export function ChatSessionView({
 
   useLayoutEffect(() => {
     adjustComposerTextareaHeight();
-  }, [input, attachments.length, adjustComposerTextareaHeight]);
+  }, [
+    input,
+    attachments.length,
+    pastedSnippets.length,
+    adjustComposerTextareaHeight,
+  ]);
 
   useEffect(() => {
     window.addEventListener("resize", adjustComposerTextareaHeight);
@@ -459,15 +495,54 @@ export function ChatSessionView({
     [attachments, syncFileInput],
   );
 
-  const onPasteFiles = useCallback(
-    (e: React.ClipboardEvent) => {
+  const removePastedSnippet = useCallback((id: string) => {
+    setPastedSnippets((prev) => prev.filter((s) => s.id !== id));
+    setAttachError(null);
+  }, []);
+
+  const onComposerPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (busy) return;
-      const pasted = filesFromClipboard(e.clipboardData);
-      if (!pasted.length) return;
+      const cd = e.clipboardData;
+      if (!cd) return;
+
+      const pastedFiles = filesFromClipboard(cd);
+      if (pastedFiles.length > 0) {
+        e.preventDefault();
+        mergeIntoFileInput(pastedFiles);
+        return;
+      }
+
+      const plain = cd.getData("text/plain");
+      if (!plain?.trim()) return;
+      if (!clipboardLooksLikeEditorPaste(cd)) return;
+
       e.preventDefault();
-      mergeIntoFileInput(pasted);
+      if (attachments.length + pastedSnippets.length >= MAX_ATTACH_FILES) {
+        setAttachError(
+          `At most ${MAX_ATTACH_FILES} attachments and pasted blocks.`,
+        );
+        return;
+      }
+      const bytes = new TextEncoder().encode(plain).length;
+      if (bytes > MAX_ATTACH_BYTES) {
+        setAttachError(
+          `Pasted text is too large (max ${Math.round(MAX_ATTACH_BYTES / 1024 / 1024)} MB).`,
+        );
+        return;
+      }
+      setAttachError(null);
+      setPastedSnippets((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), text: plain },
+      ]);
     },
-    [busy, mergeIntoFileInput],
+    [
+      busy,
+      mergeIntoFileInput,
+      attachments.length,
+      pastedSnippets.length,
+    ],
   );
 
   const hasFilePayload = (dt: DataTransfer | null) =>
@@ -505,13 +580,28 @@ export function ChatSessionView({
     async (e: React.FormEvent) => {
       e.preventDefault();
       const text = input.trim();
-      if ((!text && !attachments.length) || busy) return;
+      const hasPayload =
+        Boolean(text) || attachments.length > 0 || pastedSnippets.length > 0;
+      if (!hasPayload || busy) return;
+
+      const snippetFiles = pastedSnippets.map(
+        (s) =>
+          new File([s.text], `pasted-${s.id.slice(0, 8)}.txt`, {
+            type: "text/plain",
+          }),
+      );
+      const mergedFiles = [...attachments, ...snippetFiles];
+      const validated = validateFiles(mergedFiles);
+      if (mergedFiles.length && validated === undefined) return;
 
       stickToBottomRef.current = true;
       autoFollowPausedRef.current = false;
       setFollowingStream(true);
 
-      const prepared = await prepareAttachmentsForModel(attachments, text);
+      const prepared = await prepareAttachmentsForModel(
+        validated ?? mergedFiles,
+        text,
+      );
       if (prepared.error) {
         setAttachError(prepared.error);
         return;
@@ -520,6 +610,7 @@ export function ChatSessionView({
 
       setInput("");
       setAttachments([]);
+      setPastedSnippets([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       clearError();
       await sendMessage({
@@ -536,7 +627,15 @@ export function ChatSessionView({
           : {}),
       });
     },
-    [input, busy, attachments, sendMessage, clearError],
+    [
+      input,
+      busy,
+      attachments,
+      pastedSnippets,
+      sendMessage,
+      clearError,
+      validateFiles,
+    ],
   );
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -692,11 +791,7 @@ export function ChatSessionView({
         </div>
       )}
 
-      <form
-        onSubmit={onSubmit}
-        onPaste={onPasteFiles}
-        className="flex-shrink-0 space-y-2"
-      >
+      <form onSubmit={onSubmit} className="flex-shrink-0 space-y-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -717,7 +812,7 @@ export function ChatSessionView({
           disabled={busy}
         />
         <div className="border-foreground/15 bg-white dark:bg-zinc-700 flex flex-col gap-2 rounded-[28px] border px-3 py-2 shadow-sm">
-          {attachments.length > 0 && (
+          {(attachments.length > 0 || pastedSnippets.length > 0) && (
             <div className="flex flex-wrap gap-2 px-1 pt-0.5 pb-1">
               {attachments.map((file, idx) => (
                 <ComposerAttachmentPreview
@@ -725,6 +820,14 @@ export function ChatSessionView({
                   file={file}
                   disabled={busy}
                   onRemove={() => removeAttachment(idx)}
+                />
+              ))}
+              {pastedSnippets.map((snip) => (
+                <ComposerPastedSnippetPreview
+                  key={snip.id}
+                  previewSource={snip.text}
+                  disabled={busy}
+                  onRemove={() => removePastedSnippet(snip.id)}
                 />
               ))}
             </div>
@@ -760,6 +863,7 @@ export function ChatSessionView({
               ref={composerTextareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onComposerPaste}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -773,11 +877,21 @@ export function ChatSessionView({
             />
             <Tooltip
               content="Send message"
-              disabled={busy || (!input.trim() && attachments.length === 0)}
+              disabled={
+                busy ||
+                (!input.trim() &&
+                  attachments.length === 0 &&
+                  pastedSnippets.length === 0)
+              }
             >
               <button
                 type="submit"
-                disabled={busy || (!input.trim() && attachments.length === 0)}
+                disabled={
+                  busy ||
+                  (!input.trim() &&
+                    attachments.length === 0 &&
+                    pastedSnippets.length === 0)
+                }
                 aria-label="Send message"
                 className="bg-foreground text-background hover:opacity-92 mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40"
               >
