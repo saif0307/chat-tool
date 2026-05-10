@@ -51,8 +51,14 @@ const MAX_ATTACH_FILES = 8;
 /** Extra scrollable space below the last message so content clears the overlaid composer. */
 const COMPOSER_SCROLL_GAP_PX = 28;
 
-/** Pixels from scroll bottom to treat as “pinned” for follow-mode (chat UX). */
-const PIN_TO_BOTTOM_THRESHOLD_PX = 72;
+/**
+ * How close to the bottom (px) we must be to auto-snap on new tokens. Keep small so scrolling up
+ * isn’t fought by streaming layout updates.
+ */
+const SNAP_TO_BOTTOM_THRESHOLD_PX = 18;
+
+/** User is “back at the tail” — resume auto-follow after they’ve scrolled away (wheel / trackpad). */
+const RESUME_AUTO_FOLLOW_THRESHOLD_PX = 12;
 
 function distanceFromBottom(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -166,6 +172,8 @@ export function ChatSessionView({
   const [input, setInput] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  /** False while user reads older messages — use live `messages` (no defer) for stable scroll. */
+  const [followingStream, setFollowingStream] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -174,6 +182,10 @@ export function ChatSessionView({
   const endRef = useRef<HTMLDivElement>(null);
   /** When true, assistant streaming / layout growth keeps the viewport snapped to the newest content. */
   const stickToBottomRef = useRef(true);
+  const scrollPinRafRef = useRef<number | null>(null);
+  /** While streaming: set true when user scrolls up — blocks programmatic snap until they return to the tail. */
+  const autoFollowPausedRef = useRef(false);
+  const prevScrollTopRef = useRef<number | null>(null);
 
   /** Match `max-h-[min(70vh,28rem)]` — do not use getComputedStyle(maxHeight); `min()` often breaks parseFloat. */
   const getComposerTextareaMaxPx = useCallback(() => {
@@ -221,9 +233,9 @@ export function ChatSessionView({
     const ro = new ResizeObserver(() => {
       applyComposerBottomInset();
       const scrollEl = messagesScrollRef.current;
-      if (scrollEl && stickToBottomRef.current) {
-        scrollEl.scrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
-      }
+      if (!scrollEl || autoFollowPausedRef.current) return;
+      if (distanceFromBottom(scrollEl) > SNAP_TO_BOTTOM_THRESHOLD_PX) return;
+      scrollEl.scrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
     });
     ro.observe(dockEl);
     return () => ro.disconnect();
@@ -273,9 +285,10 @@ export function ChatSessionView({
 
   const busy = status === "streaming" || status === "submitted";
 
-  /** Lets React interrupt paint during rapid stream chunks (Concurrent Features). */
+  /** Defer paint only while following the tail — avoids jank fighting scroll when reading history. */
   const deferredMessages = useDeferredValue(messages);
-  const renderMessages = busy ? deferredMessages : messages;
+  const renderMessages =
+    busy && followingStream ? deferredMessages : messages;
   const lastMessageId = messages.at(-1)?.id;
 
   const generationStartedAtRef = useRef<number | null>(null);
@@ -306,28 +319,59 @@ export function ChatSessionView({
   useEffect(() => {
     const scrollEl = messagesScrollRef.current;
     if (!scrollEl) return;
-    const onScroll = () => {
-      stickToBottomRef.current =
-        distanceFromBottom(scrollEl) <= PIN_TO_BOTTOM_THRESHOLD_PX;
+
+    const flushPin = () => {
+      scrollPinRafRef.current = null;
+      const st = scrollEl.scrollTop;
+      const prev = prevScrollTopRef.current;
+      let scrolledUp = false;
+      if (prev !== null && busy && st < prev - 0.5) {
+        autoFollowPausedRef.current = true;
+        scrolledUp = true;
+        setFollowingStream(false);
+      }
+      prevScrollTopRef.current = st;
+
+      const dist = distanceFromBottom(scrollEl);
+      const pin = dist <= SNAP_TO_BOTTOM_THRESHOLD_PX;
+      stickToBottomRef.current = pin;
+      if (!scrolledUp && dist <= RESUME_AUTO_FOLLOW_THRESHOLD_PX) {
+        autoFollowPausedRef.current = false;
+      }
+      setFollowingStream(busy ? !autoFollowPausedRef.current : true);
     };
+
+    const onScroll = () => {
+      if (scrollPinRafRef.current != null) return;
+      scrollPinRafRef.current = requestAnimationFrame(flushPin);
+    };
+
     scrollEl.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => scrollEl.removeEventListener("scroll", onScroll);
-  }, []);
+    flushPin();
+    return () => {
+      scrollEl.removeEventListener("scroll", onScroll);
+      if (scrollPinRafRef.current != null) {
+        cancelAnimationFrame(scrollPinRafRef.current);
+        scrollPinRafRef.current = null;
+      }
+    };
+  }, [busy]);
 
   useLayoutEffect(() => {
-    applyComposerBottomInset();
     const scrollEl = messagesScrollRef.current;
-    if (!scrollEl || !stickToBottomRef.current) return;
-    const snapToBottom = () => {
-      scrollEl.scrollTop = scrollEl.scrollHeight - scrollEl.clientHeight;
-    };
-    snapToBottom();
+    if (!scrollEl || autoFollowPausedRef.current) return;
+
+    const pinned =
+      distanceFromBottom(scrollEl) <= SNAP_TO_BOTTOM_THRESHOLD_PX;
+    stickToBottomRef.current = pinned;
+    if (!pinned) return;
+
     requestAnimationFrame(() => {
-      applyComposerBottomInset();
-      snapToBottom();
+      const el = messagesScrollRef.current;
+      if (!el || autoFollowPausedRef.current) return;
+      el.scrollTop = el.scrollHeight - el.clientHeight;
     });
-  }, [messages, status, renderMessages, applyComposerBottomInset]);
+  }, [messages, status]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -424,6 +468,8 @@ export function ChatSessionView({
       if ((!text && !attachments.length) || busy) return;
 
       stickToBottomRef.current = true;
+      autoFollowPausedRef.current = false;
+      setFollowingStream(true);
 
       const prepared = await prepareAttachmentsForModel(attachments, text);
       if (prepared.error) {
@@ -603,7 +649,7 @@ export function ChatSessionView({
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           ref={messagesScrollRef}
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-4 pt-4 pr-1 [scrollbar-gutter:stable]"
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-4 pt-4 pr-1 [scrollbar-gutter:stable] [overflow-anchor:none]"
         >
           {messages.length === 0 && (
             <div className="text-foreground/55 flex flex-col items-center justify-center gap-3 px-4 py-12 text-center">
