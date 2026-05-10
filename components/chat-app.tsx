@@ -2,7 +2,7 @@
 
 import { generateId } from "ai";
 import type { UIMessage } from "ai";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   loadSessions,
   saveSessions,
@@ -34,6 +34,8 @@ export function ChatApp() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [appSettings, setAppSettings] = useState<AppChatSettings>(defaultAppChatSettings);
+  /** Apply after `sessions` commits — avoids active id updating before / without the new session row. */
+  const pendingActivateIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -49,6 +51,28 @@ export function ChatApp() {
       const newest = [...stored].sort((a, b) => b.updatedAt - a.updatedAt)[0];
       setActiveId(newest.id);
     }
+  }, []);
+
+  /** If active id drifts from session list (storage bugs), recover instead of infinite “Loading…”. */
+  useEffect(() => {
+    if (!mounted || sessions.length === 0) return;
+    const valid =
+      activeId != null && sessions.some((s) => s.id === activeId);
+    if (valid) return;
+    const fallback = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    setActiveId(fallback.id);
+  }, [mounted, sessions, activeId]);
+
+  useLayoutEffect(() => {
+    const id = pendingActivateIdRef.current;
+    if (id === null) return;
+    pendingActivateIdRef.current = null;
+    setActiveId(id);
+  }, [sessions]);
+
+  const selectSession = useCallback((id: string) => {
+    pendingActivateIdRef.current = null;
+    setActiveId(id);
   }, []);
 
   const updateAppSettings = useCallback((next: AppChatSettings) => {
@@ -71,13 +95,13 @@ export function ChatApp() {
     setSessions((prev) => {
       const existingEmpty = prev.find((s) => s.messages.length === 0);
       if (existingEmpty) {
-        setActiveId(existingEmpty.id);
+        pendingActivateIdRef.current = existingEmpty.id;
         return prev;
       }
       const s = makeEmptySession();
       const next = [...prev, s];
       saveSessions(next);
-      setActiveId(s.id);
+      pendingActivateIdRef.current = s.id;
       return next;
     });
   }, []);
@@ -96,12 +120,12 @@ export function ChatApp() {
   const handleDelete = useCallback((id: string) => {
     setSessions((prev) => {
       if (prev.length <= 1) return prev;
-      let next = prev.filter((s) => s.id !== id);
+      const next = prev.filter((s) => s.id !== id);
+      saveSessions(next);
       if (activeId === id) {
         const fallback = [...next].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-        setActiveId(fallback.id);
+        pendingActivateIdRef.current = fallback.id;
       }
-      saveSessions(next);
       return next;
     });
   }, [activeId]);
@@ -114,12 +138,12 @@ export function ChatApp() {
       updatedAt: Date.now(),
       messages: forkedMessages,
     };
+    pendingActivateIdRef.current = newSession.id;
     setSessions((prev) => {
       const next = [...prev, newSession];
       saveSessions(next);
       return next;
     });
-    setActiveId(newSession.id);
   }, []);
 
   const active = sessions.find((s) => s.id === activeId);
@@ -141,7 +165,7 @@ export function ChatApp() {
           sessions={sessions}
           activeId={activeId}
           canCreateNewChat={canCreateNewChat}
-          onSelect={setActiveId}
+          onSelect={selectSession}
           onNew={handleNewChat}
           onDelete={handleDelete}
           onRenameSession={handleRenameSession}
