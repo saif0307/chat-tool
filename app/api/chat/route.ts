@@ -50,6 +50,16 @@ const SYSTEM_OUTPUT_HYGIENE = [
   "- Never repeat filenames as paths or links—no “download it here:” with a path. One short sentence of acknowledgment is enough.",
 ].join("\n");
 
+/**
+ * Match depth to the ask—mainstream assistants usually give one solid answer unless the user asked for options.
+ */
+const SYSTEM_RESPONSE_BALANCE = [
+  "Response balance (important):",
+  "- Answer at the level implied by the request. One clear deliverable is usually enough—do not default to multiple variants (e.g. short / standard / formal) unless they asked for alternatives, tones, or options.",
+  "- For drafts (letters, emails, messages): prefer one copy-ready version with only necessary placeholders (e.g. name, date)—not three full templates packed with optional fields.",
+  "- Make a reasonable attempt when details are unspecified (sensible dates, neutral wording); ask follow-ups sparingly and only when something material is missing.",
+].join("\n");
+
 const SYSTEM_FAL_MEDIA = [
   "Images and video (generate_image, edit_image, generate_video):",
   "- generate_image: new image from a text prompt only (no reference photo).",
@@ -72,9 +82,10 @@ const SYSTEM_WORKSPACE_FILES = [
 /** In-chat draft viewer — model fences drafts so the UI can show Edit / Copy / Share. */
 const SYSTEM_DRAFT_ARTIFACT = [
   "Draft viewer (emails, letters, long markdown documents):",
-  "- Put a short intro in normal chat if helpful, then fence only the draft using these exact bracket lines (they must not be altered): [[[BEGIN DRAFT]]] … [[[END DRAFT]]].",
+  "- For brief, routine messages that fit in a normal reply (e.g. a same-day sick note, short thank-you), put the text directly in the message—do not wrap them in [[[BEGIN DRAFT]]] … [[[END DRAFT]]].",
+  "- Use [[[BEGIN DRAFT]]] … [[[END DRAFT]]] when the body is long, multi-section, or would clearly benefit from in-app draft tools—not for every formal snippet.",
+  "- Put a short intro outside the fence if helpful, then fence only the draft using these exact bracket lines (they must not be altered): [[[BEGIN DRAFT]]] … [[[END DRAFT]]].",
   "- Optional kind on the opening line: [[[BEGIN DRAFT email]]], [[[BEGIN DRAFT markdown]]], or [[[BEGIN DRAFT plain]]]. Default is fine when unspecified.",
-  "- Use this whenever the user asks for an email, formal message, or substantial reusable document—not for short chat replies.",
 ].join("\n");
 
 type ChatRequestBody = {
@@ -223,6 +234,7 @@ export async function POST(req: Request) {
     );
   }
   systemParts.push(SYSTEM_OUTPUT_HYGIENE);
+  systemParts.push(SYSTEM_RESPONSE_BALANCE);
   systemParts.push(SYSTEM_DRAFT_ARTIFACT);
   systemParts.push(SYSTEM_WORKSPACE_FILES);
   if (hasFalMedia) {
