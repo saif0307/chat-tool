@@ -43,3 +43,35 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * Chat Markdown — Tailwind Preflight sets ul/ol/menu { list-style: none }, which makes
+ * bullet and numbered lists look like plain paragraphs. Restore markers inside the
+ * content box so flex/min-w-0 layouts never clip outside-positioned bullets.
+ */
+.markdown-body .markdown-chat-ul,
+.markdown-body .markdown-chat-ol {
+  list-style-position: inside;
+  padding-inline-start: 0;
+}
+
+.markdown-body .markdown-chat-ul {
+  list-style-type: disc;
+}
+
+.markdown-body .markdown-chat-ol {
+  list-style-type: decimal;
+}
+
+.markdown-body .markdown-chat-ul ::marker,
+.markdown-body .markdown-chat-ol ::marker {
+  color: color-mix(in oklab, var(--foreground) 58%, transparent);
+}
+
+.markdown-body :where(h1, h2, h3) {
+  color: var(--foreground);
+}
+
+.markdown-body :where(strong) {
+  font-weight: 600;
+}

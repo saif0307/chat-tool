@@ -158,23 +158,48 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
 
       <div className="max-h-[min(70vh,32rem)] overflow-y-auto px-4 py-3">
         {editing ? (
-          <textarea
-            value={edited}
-            onChange={(e) => setEdited(e.target.value)}
-            spellCheck
-            rows={Math.min(
-              48,
-              Math.max(8, (edited.match(/\n/g)?.length ?? 0) + 4),
-            )}
-            style={{
-              minHeight:
-                editMinHeightPx != null
-                  ? editMinHeightPx
-                  : "min(70vh, 32rem)",
-            }}
-            className="border-foreground/15 bg-background text-foreground placeholder:text-foreground/35 focus:border-sky-500/50 box-border min-h-48 w-full resize-y rounded-xl border px-3 py-2.5 font-mono text-[13px] leading-relaxed outline-none"
-            aria-label="Edit draft"
-          />
+          <div className="relative">
+            <Tooltip content="Copy draft">
+              <button
+                type="button"
+                onClick={() => void copyText()}
+                className={`${iconBtn} absolute right-2 top-2 z-10`}
+                aria-label="Copy draft"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                  aria-hidden
+                >
+                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                </svg>
+              </button>
+            </Tooltip>
+            <textarea
+              value={edited}
+              onChange={(e) => setEdited(e.target.value)}
+              spellCheck
+              rows={Math.min(
+                48,
+                Math.max(8, (edited.match(/\n/g)?.length ?? 0) + 4),
+              )}
+              style={{
+                minHeight:
+                  editMinHeightPx != null
+                    ? editMinHeightPx
+                    : "min(70vh, 32rem)",
+              }}
+              className="border-foreground/15 bg-background text-foreground placeholder:text-foreground/35 focus:border-sky-500/50 box-border min-h-48 w-full resize-y rounded-xl border px-3 pb-2.5 pr-11 pt-10 font-mono text-[13px] leading-relaxed outline-none"
+              aria-label="Edit draft"
+            />
+          </div>
         ) : (
           <div ref={previewRef} data-draft-preview className="min-w-0">
             {format === "plain" ? (

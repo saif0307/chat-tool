@@ -4,32 +4,48 @@ import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import "highlight.js/styles/github-dark.css";
 import { sanitizeAssistantMarkdown } from "@/lib/sanitize-assistant-markdown";
+import { MarkdownCodeBlock } from "@/components/markdown-code-block";
 import { PreviewableImage } from "@/components/image-lightbox";
 
 /** Stable plugin tuples — new arrays each render force react-markdown to redo expensive work. */
-const remarkPlugins = [remarkGfm];
-const rehypePlugins = [rehypeHighlight];
+const remarkPlugins = [remarkGfm, remarkBreaks];
+/** Full pipeline once streaming ends (syntax highlighting is the heavy part). */
+const rehypePluginsFull = [rehypeHighlight];
+/** While tokens stream: parse Markdown for headings/lists/bold; skip highlight pass. */
+const rehypePluginsStreaming: typeof rehypePluginsFull = [];
 
 const markdownComponents: Components = {
   p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
   ul: ({ children }) => (
-    <ul className="mb-3 list-disc space-y-1 pl-6 last:mb-0">{children}</ul>
+    <ul className="markdown-chat-ul mb-3 space-y-2 last:mb-0">{children}</ul>
   ),
   ol: ({ children }) => (
-    <ol className="mb-3 list-decimal space-y-1 pl-6 last:mb-0">{children}</ol>
+    <ol className="markdown-chat-ol mb-3 space-y-2 last:mb-0">{children}</ol>
   ),
-  li: ({ children }) => <li className="[&>p]:mb-0">{children}</li>,
+  li: ({ children }) => (
+    <li className="text-foreground pl-0 [&>p]:mb-0">{children}</li>
+  ),
   h1: ({ children }) => (
-    <h1 className="mb-3 mt-4 text-xl font-semibold first:mt-0">{children}</h1>
+    <h1 className="text-foreground mb-3 mt-5 text-2xl font-semibold tracking-tight first:mt-0">
+      {children}
+    </h1>
   ),
   h2: ({ children }) => (
-    <h2 className="mb-2 mt-4 text-lg font-semibold first:mt-0">{children}</h2>
+    <h2 className="text-foreground mb-3 mt-6 text-xl font-semibold tracking-tight first:mt-0">
+      {children}
+    </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="mb-2 mt-3 text-base font-semibold first:mt-0">{children}</h3>
+    <h3 className="text-foreground mb-2 mt-5 text-lg font-semibold tracking-tight first:mt-0">
+      {children}
+    </h3>
+  ),
+  strong: ({ children }) => (
+    <strong className="text-foreground font-semibold">{children}</strong>
   ),
   a: ({ href, children }) => (
     <a
@@ -61,11 +77,7 @@ const markdownComponents: Components = {
   td: ({ children }) => (
     <td className="border-foreground/15 border px-3 py-2 align-top">{children}</td>
   ),
-  pre: ({ children }) => (
-    <pre className="border-foreground/10 bg-zinc-950 my-3 overflow-x-auto rounded-xl border p-4 text-[13px] leading-normal text-zinc-100 dark:border-zinc-700/35 dark:bg-zinc-900/95">
-      {children}
-    </pre>
-  ),
+  pre: ({ children }) => <MarkdownCodeBlock>{children}</MarkdownCodeBlock>,
   code: ({ className, children, ...props }) => {
     const isBlock = typeof className === "string" && className.includes("language-");
     if (isBlock) {
@@ -102,8 +114,7 @@ const markdownComponents: Components = {
 type Props = {
   content: string;
   /**
-   * While tokens stream in, skip markdown + syntax highlighting (very expensive per update).
-   * Full markdown runs once when this becomes false.
+   * While tokens stream in, fenced-code syntax highlighting is skipped (cheap Markdown still runs).
    */
   streaming?: boolean;
 };
@@ -111,19 +122,11 @@ type Props = {
 function MarkdownMessageInner({ content, streaming = false }: Props) {
   const safeContent = useMemo(() => sanitizeAssistantMarkdown(content), [content]);
 
-  if (streaming) {
-    return (
-      <div className="markdown-body wrap-break-word wrap-anywhere text-foreground min-w-0 max-w-full text-[15px] leading-relaxed whitespace-pre-wrap [contain:content]">
-        {safeContent}
-      </div>
-    );
-  }
-
   return (
-    <div className="markdown-body wrap-break-word wrap-anywhere min-w-0 max-w-full text-[15px] leading-relaxed">
+    <div className="markdown-body wrap-break-word wrap-anywhere text-foreground min-w-0 max-w-full text-[15px] leading-relaxed contain-content">
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+        rehypePlugins={streaming ? rehypePluginsStreaming : rehypePluginsFull}
         components={markdownComponents}
       >
         {safeContent}
