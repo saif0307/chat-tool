@@ -4,6 +4,8 @@
  */
 export const FAL_IMAGE_STANDARD = "fal-ai/flux/schnell";
 export const FAL_IMAGE_PREMIUM = "fal-ai/flux-2-pro";
+/** Google Nano Banana 2 — image editing from one or more reference images + prompt (fal.ai). */
+export const FAL_NANO_BANANA_EDIT = "fal-ai/nano-banana-2/edit";
 export const FAL_VIDEO_STANDARD = "fal-ai/wan/v2.2-a14b/text-to-video";
 export const FAL_VIDEO_PREMIUM = "fal-ai/kling-video/v3/pro/text-to-video";
 

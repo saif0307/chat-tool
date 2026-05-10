@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Tooltip } from "@/components/tooltip";
+import { PreviewableImage } from "@/components/image-lightbox";
 
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -30,8 +32,7 @@ export function MessageAttachmentPart({ url, filename, mediaType }: MessageFileP
     <div className="border-foreground/15 bg-foreground/5 mt-2 overflow-hidden rounded-xl border">
       {isImg ? (
         <div className="flex flex-col gap-1 p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element -- blob/data URLs from chat parts */}
-          <img
+          <PreviewableImage
             src={url}
             alt={label}
             className="mx-auto max-h-[min(28rem,calc(100vh-12rem))] max-w-full rounded-lg object-contain"
@@ -43,7 +44,7 @@ export function MessageAttachmentPart({ url, filename, mediaType }: MessageFileP
           <object
             data={url}
             type="application/pdf"
-            title={label}
+            aria-label={label}
             className="bg-background min-h-[420px] w-full rounded-lg border border-dashed"
           >
             <div className="text-foreground/75 flex flex-col gap-2 p-4 text-sm">
@@ -81,7 +82,7 @@ export function MessageAttachmentPart({ url, filename, mediaType }: MessageFileP
           <a
             href={url}
             download={filename}
-            className="border-foreground/15 bg-background text-foreground hover:bg-foreground/5 shrink-0 rounded-lg border px-3 py-2 text-sm font-medium"
+            className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
           >
             Download
           </a>
@@ -143,14 +144,13 @@ export function ComposerAttachmentPreview({ file, onRemove, disabled }: Composer
         disabled={disabled}
         onClick={onRemove}
         aria-label={`Remove ${file.name}`}
-        className="border-foreground/20 bg-background text-foreground/85 hover:bg-foreground/10 absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border text-lg leading-none disabled:opacity-40"
+        className="text-foreground/45 hover:bg-foreground/15 hover:text-foreground absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full text-lg leading-none transition-colors disabled:opacity-40"
       >
         ×
       </button>
       <div className="flex min-h-[88px] w-full items-center justify-center overflow-hidden rounded-lg bg-zinc-200/80 dark:bg-zinc-800/90">
         {isImg && objectUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */
-          <img
+          <PreviewableImage
             src={objectUrl}
             alt=""
             className="max-h-24 min-h-[72px] min-w-[72px] max-w-full object-contain"
@@ -170,9 +170,11 @@ export function ComposerAttachmentPreview({ file, onRemove, disabled }: Composer
           </span>
         )}
       </div>
-      <p className="text-foreground/80 line-clamp-2 text-[11px] leading-snug" title={file.name}>
-        {file.name}
-      </p>
+      <Tooltip content={file.name}>
+        <span className="text-foreground/80 line-clamp-2 block cursor-default text-[11px] leading-snug">
+          {file.name}
+        </span>
+      </Tooltip>
       <p className="text-foreground/50 text-[10px]">{formatFileSize(file.size)}</p>
     </div>
   );

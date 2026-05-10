@@ -5,6 +5,8 @@ const STORAGE_KEY = "my-chatbot-sessions-v1";
 export type ChatSession = {
   id: string;
   title: string;
+  /** When `manual`, auto title from first message does not overwrite `title`. */
+  titleMode?: "auto" | "manual";
   updatedAt: number;
   messages: UIMessage[];
 };
@@ -15,9 +17,13 @@ function normalizeSessionEntry(raw: unknown): ChatSession | null {
   const id = typeof o.id === "string" ? o.id : "";
   if (!id) return null;
   const title = typeof o.title === "string" ? o.title : "New chat";
+  const titleMode =
+    o.titleMode === "manual" || o.titleMode === "auto"
+      ? o.titleMode
+      : undefined;
   const updatedAt = typeof o.updatedAt === "number" ? o.updatedAt : Date.now();
   const messages = Array.isArray(o.messages) ? (o.messages as UIMessage[]) : [];
-  return { id, title, updatedAt, messages };
+  return { id, title, titleMode, updatedAt, messages };
 }
 
 export function loadSessions(): ChatSession[] {

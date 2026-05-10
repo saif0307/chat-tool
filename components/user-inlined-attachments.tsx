@@ -3,6 +3,8 @@
 import { useEffect, useMemo } from "react";
 import { extensionFromFilename } from "@/lib/attachment-allowlist";
 import { formatFileSize } from "@/components/attachment-display";
+import { Tooltip } from "@/components/tooltip";
+import { PreviewableImage } from "@/components/image-lightbox";
 import type { InlinedAttachmentPayload } from "@/lib/prepare-attachments";
 
 function mimeForDownload(filename: string): string {
@@ -94,15 +96,17 @@ function InlinedAttachmentCard({ item }: { item: InlinedAttachmentPayload }) {
     <div className="border-foreground/12 bg-foreground/4 dark:bg-foreground/6 min-w-0 overflow-hidden rounded-xl border">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-dashed px-3 py-2.5">
         <div className="min-w-0 flex-1">
-          <p className="text-foreground truncate text-sm font-medium" title={item.filename}>
-            {item.filename}
-          </p>
+          <Tooltip content={item.filename}>
+            <span className="text-foreground block truncate text-sm font-medium">
+              {item.filename}
+            </span>
+          </Tooltip>
           <p className="text-foreground/50 text-xs">{formatFileSize(bytes)} · text</p>
         </div>
         <a
           href={blobUrl}
           download={item.filename}
-          className="border-foreground/15 bg-background text-foreground hover:bg-foreground/8 shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+          className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
         >
           Download
         </a>
@@ -111,7 +115,7 @@ function InlinedAttachmentCard({ item }: { item: InlinedAttachmentPayload }) {
         <div className="border-foreground/8 bg-background max-h-56 min-h-[160px] w-full overflow-hidden border-t">
           {/* sandbox: no scripts; enough to render structure preview */}
           <iframe
-            title={item.filename}
+            aria-label={item.filename}
             srcDoc={item.content}
             sandbox=""
             className="h-56 w-full bg-white dark:bg-zinc-950"
@@ -120,8 +124,11 @@ function InlinedAttachmentCard({ item }: { item: InlinedAttachmentPayload }) {
       )}
       {kind === "svg" && (
         <div className="border-foreground/8 bg-background max-h-56 overflow-auto border-t p-2">
-          {/* eslint-disable-next-line @next/next/no-img-element -- blob URL from text */}
-          <img src={blobUrl} alt="" className="mx-auto max-h-52 max-w-full object-contain" />
+          <PreviewableImage
+            src={blobUrl}
+            alt={item.filename}
+            className="mx-auto max-h-52 max-w-full object-contain"
+          />
         </div>
       )}
       {kind === "code" && (

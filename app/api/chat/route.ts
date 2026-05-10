@@ -51,10 +51,14 @@ const SYSTEM_OUTPUT_HYGIENE = [
 ].join("\n");
 
 const SYSTEM_FAL_MEDIA = [
-  "Images and video (generate_image, generate_video):",
-  "- Use these when the user wants a new illustration or video clip—not for answers that belong in plain text alone.",
-  "- You choose quality_tier (standard vs premium) from context; never ask the user to pick a model, vendor, or tier.",
-  "- After success, reply briefly; this UI shows the picture or player—do not paste long URLs or provider jargon.",
+  "Images and video (generate_image, edit_image, generate_video):",
+  "- generate_image: new image from a text prompt only (no reference photo).",
+  "- edit_image (Nano Banana 2 / fal.ai): When the user's message includes image attachment(s) and they ask to change, edit, restyle, recolor, transform, or ‘make it look like…’ that photo—call edit_image in this turn with a prompt that captures their goal. Source images are resolved from attachments automatically; never ask the user to paste URLs.",
+  "- edit_image behavior (critical): Prefer acting over interviewing. If the request is clear (e.g. ‘make this kitchen black themed’, ‘remove the person in the background’), call edit_image immediately—do not answer with only renovation tips, do not ask ‘would you like me to edit’, and do not ask matte vs glossy unless they explicitly asked you to compare finishes. After the tool returns, you may add a short note if helpful.",
+  "- If they only want verbal suggestions with no edit, answer in text and do not call edit_image.",
+  "- generate_video: short clip from a text prompt.",
+  "- For generate_image / generate_video you choose quality_tier from context; never ask the user to pick a vendor or tier.",
+  "- After media tools succeed, reply briefly; this UI shows the picture or player—do not paste long URLs or provider jargon.",
 ].join("\n");
 
 /** File download tool — appended whenever file tools are registered. */
@@ -159,7 +163,7 @@ export async function POST(req: Request) {
   }
 
   const workspaceTools = getWorkspaceFileTools();
-  const falMediaTools = getFalMediaTools();
+  const falMediaTools = getFalMediaTools(messages);
   const hasFalMedia = Object.keys(falMediaTools).length > 0;
 
   let languageModel: LanguageModel;

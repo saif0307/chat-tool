@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { DraftArtifactFormat } from "@/lib/draft-artifact-parse";
 import { MarkdownMessage } from "@/components/markdown-message";
+import { Tooltip } from "@/components/tooltip";
 
 type Props = {
   body: string;
@@ -56,7 +57,7 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
   };
 
   const iconBtn =
-    "text-foreground/70 hover:bg-foreground/10 hover:text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors";
+    "text-foreground/50 hover:bg-foreground/10 hover:text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors";
 
   function exitEdit() {
     setEditing(false);
@@ -108,12 +109,12 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
           ) : null}
         </span>
         <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            title="Copy draft"
-            onClick={() => void copyText()}
-            className={iconBtn}
-          >
+          <Tooltip content="Copy draft">
+            <button
+              type="button"
+              onClick={() => void copyText()}
+              className={iconBtn}
+            >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
@@ -128,13 +129,14 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
               <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
               <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
             </svg>
-          </button>
-          <button
-            type="button"
-            title="Share"
-            onClick={() => void shareText()}
-            className={iconBtn}
-          >
+            </button>
+          </Tooltip>
+          <Tooltip content="Share">
+            <button
+              type="button"
+              onClick={() => void shareText()}
+              className={iconBtn}
+            >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
@@ -150,6 +152,7 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
               <path d="M22 2 11 13" />
             </svg>
           </button>
+          </Tooltip>
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { PreviewableImage } from "@/components/image-lightbox";
 
 export type LooseToolPart = {
   type: string;
@@ -68,7 +69,7 @@ function FalMediaToolbar({ url, kind }: { url: string; kind: "image" | "video" }
         type="button"
         disabled={busy}
         onClick={() => void download()}
-        className="border-violet-500/40 bg-violet-500/15 text-violet-950 hover:bg-violet-500/25 dark:text-violet-100 rounded-md border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+        className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground rounded-md px-2 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
       >
         {busy ? "Downloading…" : "Download"}
       </button>
@@ -76,7 +77,7 @@ function FalMediaToolbar({ url, kind }: { url: string; kind: "image" | "video" }
         href={url}
         target="_blank"
         rel="noreferrer noopener"
-        className="text-sm font-medium text-violet-700 underline underline-offset-2 hover:text-violet-900 dark:text-violet-400 dark:hover:text-violet-300"
+        className="text-foreground/55 hover:text-foreground text-sm font-medium underline underline-offset-4"
       >
         Open in new tab
       </a>
@@ -105,6 +106,8 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
 
   const isFalImage =
     part.type.includes("generate_image") || part.type === "tool-generate_image";
+  const isFalEdit =
+    part.type.includes("edit_image") || part.type === "tool-edit_image";
   const isFalVideo =
     part.type.includes("generate_video") || part.type === "tool-generate_video";
 
@@ -142,11 +145,13 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
           ? "Searching the web…"
           : isWriteWorkspace
             ? "Preparing file…"
-            : isFalImage
-              ? "Creating image…"
-              : isFalVideo
-                ? "Rendering video…"
-                : `Calling ${title}…`;
+            : isFalEdit
+              ? "Editing image…"
+              : isFalImage
+                ? "Creating image…"
+                : isFalVideo
+                  ? "Rendering video…"
+                  : `Calling ${title}…`;
     return (
       <div className="border-sky-500/30 bg-sky-500/[0.07] mb-3 flex gap-3 rounded-lg border px-3 py-2.5 text-sm shadow-sm">
         <Spinner />
@@ -183,7 +188,11 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
 
     if (
       falUrl &&
-      (falKind === "image" || falKind === "video" || isFalImage || isFalVideo)
+      (falKind === "image" ||
+        falKind === "video" ||
+        isFalImage ||
+        isFalEdit ||
+        isFalVideo)
     ) {
       const kind = falKind === "video" || isFalVideo ? "video" : "image";
       const caption =
@@ -205,8 +214,7 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
                 preload="metadata"
               />
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element -- fal CDN URL is dynamic per generation
-              <img
+              <PreviewableImage
                 src={falUrl}
                 alt={caption || "Generated image"}
                 className="bg-foreground/5 max-h-[min(70vh,520px)] w-full rounded-lg object-contain"

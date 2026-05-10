@@ -16,7 +16,7 @@ import { resolveEffectiveModel } from "@/lib/models";
 import { defaultTitleFromMessages, type ChatSession } from "@/lib/chat-storage";
 import { messageToPlainText } from "@/lib/message-text";
 import { AssistantMessageBody } from "@/components/assistant-message-body";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { useActiveChatControlsSetter } from "@/components/active-chat-controls-context";
 import {
   ToolInvocationCard,
   type LooseToolPart,
@@ -44,12 +44,20 @@ import {
   normalizeAppChatSettings,
   type AppChatSettings,
 } from "@/lib/user-settings";
+import { Tooltip } from "@/components/tooltip";
 
 const MAX_ATTACH_BYTES = 12 * 1024 * 1024;
 const MAX_ATTACH_FILES = 8;
 
 /** Extra scrollable space below the last message so content clears the overlaid composer. */
 const COMPOSER_SCROLL_GAP_PX = 28;
+
+/** Same max width as assistant message column — composer stays aligned and does not span full screen. */
+const CHAT_COLUMN_MAX = "max-w-[min(100%,52rem)]";
+
+/** Fork / copy — icon-only, no box border (minimal UI). */
+const MESSAGE_ICON_BTN =
+  "text-foreground/45 hover:bg-foreground/10 hover:text-foreground inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors";
 
 /**
  * How close to the bottom (px) we must be to auto-snap on new tokens. Keep small so scrolling up
@@ -355,7 +363,7 @@ export function ChatSessionView({
         scrollPinRafRef.current = null;
       }
     };
-  }, [busy]);
+  }, [busy, messages.length]);
 
   useLayoutEffect(() => {
     const scrollEl = messagesScrollRef.current;
@@ -375,14 +383,15 @@ export function ChatSessionView({
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      const title = defaultTitleFromMessages(messages);
-      onPersist(session.id, {
-        messages,
-        title,
-      });
+      const autoTitle = defaultTitleFromMessages(messages);
+      const patch: Partial<ChatSession> = { messages };
+      if (session.titleMode !== "manual") {
+        patch.title = autoTitle;
+      }
+      onPersist(session.id, patch);
     }, 450);
     return () => window.clearTimeout(t);
-  }, [messages, session.id, onPersist]);
+  }, [messages, session.id, session.titleMode, onPersist]);
 
   const validateFiles = useCallback((arr: File[]): File[] | undefined => {
     setAttachError(null);
@@ -586,6 +595,61 @@ export function ChatSessionView({
     setSettingsOpen(false);
   }, [settingsDraft, onAppSettingsChange]);
 
+  const openSettings = useCallback(() => {
+    setSettingsDraft({
+      provider: appSettings.provider,
+      model: appSettings.model,
+      maxMode: appSettings.maxMode,
+      enableWebSearch: appSettings.enableWebSearch,
+      customInstructions: appSettings.customInstructions,
+    });
+    setSettingsOpen(true);
+  }, [appSettings]);
+
+  const settingsSummaryLine = useMemo(() => {
+    const parts = [
+      appSettings.provider === "openai" ? "OpenAI" : "Anthropic",
+      appSettings.maxMode ? "Max" : effectiveModel,
+      appSettings.enableWebSearch === false ? "Web off" : null,
+    ].filter(Boolean) as string[];
+    return parts.join(" · ");
+  }, [
+    appSettings.provider,
+    appSettings.maxMode,
+    appSettings.enableWebSearch,
+    effectiveModel,
+  ]);
+
+  const setActiveToolbar = useActiveChatControlsSetter();
+
+  useEffect(() => {
+    const clearChat = () => {
+      clearError();
+      setMessages([]);
+    };
+    setActiveToolbar({
+      busy,
+      stop: () => void stop(),
+      clearChat,
+      retryLast: () => void regenerate(),
+      canClear: messages.length > 0,
+      canRetry: messages.length > 0 && !busy,
+      openSettings,
+      settingsSummaryLine,
+    });
+    return () => setActiveToolbar(null);
+  }, [
+    busy,
+    clearError,
+    messages.length,
+    openSettings,
+    regenerate,
+    setActiveToolbar,
+    setMessages,
+    settingsSummaryLine,
+    stop,
+  ]);
+
   const forkHere = useCallback(
     (messageIndex: number) => {
       const slice = messages.slice(0, messageIndex + 1);
@@ -598,6 +662,148 @@ export function ChatSessionView({
     [messages, onFork],
   );
 
+  const isLanding = messages.length === 0;
+
+  const composerDock = (
+    <div
+      ref={composerDockRef}
+      className={
+        isLanding
+          ? "flex w-full justify-center"
+          : "absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 pb-4 pt-2"
+      }
+    >
+      <div className={`mx-auto flex w-full flex-col gap-3 ${CHAT_COLUMN_MAX}`}>
+      {error && (
+        <div
+          role="alert"
+          className="border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300 rounded-xl border px-4 py-3 text-sm"
+        >
+          {error.message}
+        </div>
+      )}
+
+      {attachError && (
+        <div
+          role="status"
+          className="border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100 rounded-xl border px-4 py-2 text-sm"
+        >
+          {attachError}
+        </div>
+      )}
+
+      <form
+        onSubmit={onSubmit}
+        onPaste={onPasteFiles}
+        className="flex-shrink-0 space-y-2"
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ATTACHMENT_ACCEPT}
+          tabIndex={-1}
+          onChange={(e) => {
+            const raw = e.target.files ? Array.from(e.target.files) : [];
+            const v = validateFiles(raw);
+            if (raw.length && v === undefined) {
+              e.target.value = "";
+              return;
+            }
+            setAttachments(v ?? []);
+            syncFileInput(v ?? []);
+          }}
+          className="hidden"
+          disabled={busy}
+        />
+        <div className="border-foreground/15 bg-white dark:bg-zinc-700 flex flex-col gap-2 rounded-[28px] border px-3 py-2 shadow-sm">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-1 pt-0.5 pb-1">
+              {attachments.map((file, idx) => (
+                <ComposerAttachmentPreview
+                  key={`${file.name}-${file.size}-${idx}`}
+                  file={file}
+                  disabled={busy}
+                  onRemove={() => removeAttachment(idx)}
+                />
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-1.5">
+            <Tooltip
+              content="Attach images, text, PDF, or spreadsheet files"
+              disabled={busy}
+            >
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Attach images, text files, PDFs, or spreadsheets"
+                className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                  aria-hidden
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </Tooltip>
+            <textarea
+              ref={composerTextareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void onSubmit(e);
+                }
+              }}
+              placeholder="Ask anything"
+              rows={1}
+              disabled={busy}
+              className="text-foreground placeholder:text-foreground/40 focus:placeholder:text-foreground/25 max-h-[min(70vh,28rem)] min-h-0 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-normal outline-none ring-0 focus:ring-0 disabled:opacity-60 box-border"
+            />
+            <Tooltip
+              content="Send message"
+              disabled={busy || (!input.trim() && attachments.length === 0)}
+            >
+              <button
+                type="submit"
+                disabled={busy || (!input.trim() && attachments.length === 0)}
+                aria-label="Send message"
+                className="bg-foreground text-background hover:opacity-92 mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.25"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                  aria-hidden
+                >
+                  <path d="M12 19V12" />
+                  <path d="m7 12 5-5 5 5" />
+                </svg>
+              </button>
+            </Tooltip>
+          </div>
+        </div>
+      </form>
+      </div>
+    </div>
+  );
+
   return (
     <div
       className="bg-zinc-50 dark:bg-background flex min-h-0 min-w-0 flex-1 flex-col"
@@ -605,109 +811,21 @@ export function ChatSessionView({
       onDragOver={onDragOverChat}
       onDrop={onDropFiles}
     >
-      <header className="border-foreground/10 flex flex-shrink-0 flex-wrap items-start gap-3 border-b px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-foreground truncate text-lg font-semibold tracking-tight">
-            {defaultTitleFromMessages(messages)}
-          </h1>
-          <p
-            className="text-foreground/50 mt-0.5 truncate text-xs tabular-nums"
-            title="Default for all chats — change in Settings"
-          >
-            {appSettings.provider === "openai" ? "OpenAI" : "Anthropic"}
-            {appSettings.maxMode ? " · Max" : ` · ${effectiveModel}`}
-            {appSettings.enableWebSearch === false ? " · Web off" : ""}
-          </p>
+      {isLanding ? (
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-10 px-4 pb-12 pt-8">
+            <h2 className="text-foreground max-w-[min(100%,48rem)] text-center text-3xl font-semibold tracking-tight md:text-4xl">
+              What would you like to do today?
+            </h2>
+            {composerDock}
+          </div>
         </div>
-        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2 pt-0.5">
-          <button
-            type="button"
-            onClick={() => {
-              setSettingsDraft({
-                provider: appSettings.provider,
-                model: appSettings.model,
-                maxMode: appSettings.maxMode,
-                enableWebSearch: appSettings.enableWebSearch,
-                customInstructions: appSettings.customInstructions,
-              });
-              setSettingsOpen(true);
-            }}
-            title="Settings"
-            aria-label="Open settings"
-            className="border-foreground/15 bg-background text-foreground hover:bg-foreground/5 inline-flex h-9 w-9 items-center justify-center rounded-lg border"
+      ) : (
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div
+            ref={messagesScrollRef}
+            className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-4 pt-4 pr-1 [scrollbar-gutter:stable] [overflow-anchor:none]"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-[18px] w-[18px]"
-              aria-hidden
-            >
-              <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-            </svg>
-          </button>
-          <ThemeToggle />
-          <button
-            type="button"
-            onClick={() => void stop()}
-            disabled={!busy}
-            className="border-foreground/15 bg-background text-foreground hover:bg-foreground/5 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Stop
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              clearError();
-              setMessages([]);
-            }}
-            disabled={messages.length === 0}
-            className="border-foreground/15 bg-background text-foreground hover:bg-foreground/5 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={() => void regenerate()}
-            disabled={busy || messages.length === 0}
-            className="border-foreground/15 bg-background text-foreground hover:bg-foreground/5 rounded-lg border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Retry last
-          </button>
-        </div>
-      </header>
-
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div
-          ref={messagesScrollRef}
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-4 pt-4 pr-1 [scrollbar-gutter:stable] [overflow-anchor:none]"
-        >
-          {messages.length === 0 && (
-            <div className="text-foreground/55 flex flex-col items-center justify-center gap-3 px-4 py-12 text-center">
-              <p className="text-foreground text-xl font-semibold tracking-tight">
-                Start a conversation
-              </p>
-              <p className="text-foreground/65 max-w-md text-sm leading-relaxed">
-                Open{" "}
-                <span className="font-medium text-foreground/80">Settings</span>{" "}
-                (gear) for model and custom instructions, then type below.
-                Attach images or files with +. Chats persist in{" "}
-                <span className="font-medium text-foreground/80">
-                  local storage only
-                </span>
-                ; configure provider keys on the server (see{" "}
-                <code className="bg-foreground/10 rounded px-1 py-0.5 font-mono text-[13px]">
-                  .env
-                </code>
-                ).
-              </p>
-            </div>
-          )}
           {renderMessages.map((m, idx) => {
             const inlinedMeta =
               m.role === "user"
@@ -744,45 +862,48 @@ export function ChatSessionView({
                         {m.role === "user" ? "You" : "Assistant"}
                       </span>
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          title="Fork here"
-                          aria-label="Fork here · new chat from this message"
-                          onClick={() => forkHere(idx)}
-                          className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-4 w-4"
-                            aria-hidden
-                          >
-                            <circle cx="12" cy="18" r="3" />
-                            <circle cx="6" cy="6" r="3" />
-                            <circle cx="18" cy="6" r="3" />
-                            <path d="M18 9v1a3 3 0 0 1-3 3h-6a3 3 0 0 0-3 3v1" />
-                            <path d="M12 13v5" />
-                          </svg>
-                        </button>
-                        {m.role === "user" && (
+                        <Tooltip content="Fork here · new chat from this message">
                           <button
                             type="button"
-                            title={
+                            aria-label="Fork here · new chat from this message"
+                            onClick={() => forkHere(idx)}
+                            className={MESSAGE_ICON_BTN}
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="h-4 w-4"
+                              aria-hidden
+                            >
+                              <circle cx="12" cy="18" r="3" />
+                              <circle cx="6" cy="6" r="3" />
+                              <circle cx="18" cy="6" r="3" />
+                              <path d="M18 9v1a3 3 0 0 1-3 3h-6a3 3 0 0 0-3 3v1" />
+                              <path d="M12 13v5" />
+                            </svg>
+                          </button>
+                        </Tooltip>
+                        {m.role === "user" && (
+                          <Tooltip
+                            content={
                               copiedId === m.id ? "Copied" : "Copy message"
                             }
-                            aria-label={
-                              copiedId === m.id
-                                ? "Copied to clipboard"
-                                : "Copy message"
-                            }
-                            onClick={() => void copyUserMessage(m)}
-                            className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
                           >
+                            <button
+                              type="button"
+                              aria-label={
+                                copiedId === m.id
+                                  ? "Copied to clipboard"
+                                  : "Copy message"
+                              }
+                              onClick={() => void copyUserMessage(m)}
+                              className={MESSAGE_ICON_BTN}
+                            >
                             {copiedId === m.id ? (
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -820,22 +941,25 @@ export function ChatSessionView({
                                 <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
                               </svg>
                             )}
-                          </button>
+                            </button>
+                          </Tooltip>
                         )}
                         {m.role === "assistant" && (
-                          <button
-                            type="button"
-                            title={
+                          <Tooltip
+                            content={
                               copiedId === m.id ? "Copied" : "Copy response"
                             }
-                            aria-label={
-                              copiedId === m.id
-                                ? "Copied to clipboard"
-                                : "Copy response"
-                            }
-                            onClick={() => void copyResponse(m)}
-                            className="border-foreground/15 bg-background text-foreground/80 hover:bg-foreground/5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors"
                           >
+                            <button
+                              type="button"
+                              aria-label={
+                                copiedId === m.id
+                                  ? "Copied to clipboard"
+                                  : "Copy response"
+                              }
+                              onClick={() => void copyResponse(m)}
+                              className={MESSAGE_ICON_BTN}
+                            >
                             {copiedId === m.id ? (
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -874,6 +998,7 @@ export function ChatSessionView({
                               </svg>
                             )}
                           </button>
+                          </Tooltip>
                         )}
                       </div>
                     </div>
@@ -980,131 +1105,9 @@ export function ChatSessionView({
           })}
           <div ref={endRef} className="h-3 w-full shrink-0" aria-hidden />
         </div>
-
-        <div
-          ref={composerDockRef}
-          className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-3 px-4 pb-4 pt-2"
-        >
-          {error && (
-            <div
-              role="alert"
-              className="border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300 rounded-xl border px-4 py-3 text-sm"
-            >
-              {error.message}
-            </div>
-          )}
-
-          {attachError && (
-            <div
-              role="status"
-              className="border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100 rounded-xl border px-4 py-2 text-sm"
-            >
-              {attachError}
-            </div>
-          )}
-
-          <form
-            onSubmit={onSubmit}
-            onPaste={onPasteFiles}
-            className="flex-shrink-0 space-y-2"
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept={ATTACHMENT_ACCEPT}
-              tabIndex={-1}
-              onChange={(e) => {
-                const raw = e.target.files ? Array.from(e.target.files) : [];
-                const v = validateFiles(raw);
-                if (raw.length && v === undefined) {
-                  e.target.value = "";
-                  return;
-                }
-                setAttachments(v ?? []);
-                syncFileInput(v ?? []);
-              }}
-              className="hidden"
-              disabled={busy}
-            />
-            <div className="border-foreground/15 bg-white dark:bg-zinc-700 flex flex-col gap-2 rounded-[28px] border px-3 py-2 shadow-sm">
-              {attachments.length > 0 && (
-                <div className="flex flex-wrap gap-2 px-1 pt-0.5 pb-1">
-                  {attachments.map((file, idx) => (
-                    <ComposerAttachmentPreview
-                      key={`${file.name}-${file.size}-${idx}`}
-                      file={file}
-                      disabled={busy}
-                      onRemove={() => removeAttachment(idx)}
-                    />
-                  ))}
-                </div>
-              )}
-              <div className="flex items-end gap-1.5">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Attach images, text, PDF, or spreadsheet files"
-                  aria-label="Attach images, text files, PDFs, or spreadsheets"
-                  className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-5 w-5"
-                    aria-hidden
-                  >
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                </button>
-                <textarea
-                  ref={composerTextareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void onSubmit(e);
-                    }
-                  }}
-                  placeholder="Ask anything"
-                  rows={1}
-                  disabled={busy}
-                  className="text-foreground placeholder:text-foreground/40 focus:placeholder:text-foreground/25 max-h-[min(70vh,28rem)] min-h-0 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-normal outline-none ring-0 focus:ring-0 disabled:opacity-60 box-border"
-                />
-                <button
-                  type="submit"
-                  disabled={busy || (!input.trim() && attachments.length === 0)}
-                  aria-label="Send message"
-                  title="Send message"
-                  className="bg-foreground text-background hover:opacity-92 mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.25"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-5 w-5"
-                    aria-hidden
-                  >
-                    <path d="M12 19V12" />
-                    <path d="m7 12 5-5 5 5" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
+        {composerDock}
       </div>
+      )}
 
       <ChatSettingsModal
         open={settingsOpen}

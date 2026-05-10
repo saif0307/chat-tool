@@ -1,11 +1,12 @@
 import { fal } from "@fal-ai/client";
 import { tool } from "ai";
-import type { ToolSet } from "ai";
+import type { ToolSet, UIMessage } from "ai";
 import { z } from "zod";
 import type { ImageLayout, VideoAspect } from "@/lib/fal-models";
 import {
   FAL_IMAGE_PREMIUM,
   FAL_IMAGE_STANDARD,
+  FAL_NANO_BANANA_EDIT,
   FAL_VIDEO_PREMIUM,
   FAL_VIDEO_STANDARD,
 } from "@/lib/fal-models";
@@ -33,6 +34,50 @@ function toKlingDuration(seconds: number): KlingDurationSeconds {
 
 function getFalKey(): string | undefined {
   return process.env.FAL_KEY?.trim();
+}
+
+function collectImageUrlsFromMessage(m: UIMessage): string[] {
+  const urls: string[] = [];
+  for (const p of m.parts) {
+    if (p.type !== "file") continue;
+    const fp = p as { url?: string; mediaType?: string };
+    if (!fp.url?.trim()) continue;
+    if (!(fp.mediaType ?? "").toLowerCase().startsWith("image/")) continue;
+    urls.push(fp.url);
+  }
+  return urls;
+}
+
+/** Prefer latest user message; then scan recent user turns for image file parts. */
+function resolveImageUrlsForEdit(
+  messages: UIMessage[],
+  explicit?: string[],
+): string[] {
+  if (explicit?.filter((u) => u.trim()).length) {
+    return explicit!.filter((u) => u.trim());
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const found = collectImageUrlsFromMessage(m);
+    if (found.length) return found;
+  }
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  let userTurns = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    userTurns++;
+    if (userTurns > 6) break;
+    for (const u of collectImageUrlsFromMessage(m)) {
+      if (!seen.has(u)) {
+        seen.add(u);
+        merged.push(u);
+      }
+    }
+  }
+  return merged;
 }
 
 function pickImageUrl(data: unknown): string | null {
@@ -124,6 +169,97 @@ const generateImageTool = tool({
   },
 });
 
+const nanoBananaAspectRatios = [
+  "auto",
+  "21:9",
+  "16:9",
+  "3:2",
+  "4:3",
+  "5:4",
+  "1:1",
+  "4:5",
+  "3:4",
+  "2:3",
+  "9:16",
+  "4:1",
+  "1:4",
+  "8:1",
+  "1:8",
+] as const;
+
+function buildEditImageTool(messages: UIMessage[]) {
+  return tool({
+    description:
+      "Edit or transform photo(s) the user attached using Google's Nano Banana 2 (fal.ai). Call this when their message includes image(s) and they want visual changes (style, colors, theme, objects, background, restoration). Use attachments from the conversation automatically—omit image_urls unless you must reference specific URLs. If their instructions are clear, call this tool immediately in this turn; do not substitute long prose-only interior-design advice or ask permission to edit. For brand-new images from text only (no photo), use generate_image instead.",
+    inputSchema: z.object({
+      prompt: z
+        .string()
+        .min(1)
+        .describe(
+          "What to change or produce relative to the source image(s): edits, style, scene, etc.",
+        ),
+      image_urls: z
+        .array(z.string().min(1))
+        .optional()
+        .describe(
+          "Optional: explicit image URLs from file parts in this chat (data URLs or hosted URLs). Omit to auto-use images from the user's recent attachments.",
+        ),
+      aspect_ratio: z
+        .enum(nanoBananaAspectRatios)
+        .optional()
+        .describe("Output aspect ratio; default auto."),
+      resolution: z
+        .enum(["0.5K", "1K", "2K", "4K"])
+        .optional()
+        .describe("Output resolution; default 1K."),
+    }),
+    execute: async ({ prompt, image_urls, aspect_ratio, resolution }) => {
+      const key = getFalKey();
+      if (!key) {
+        return { error: "Image editing is not configured (missing FAL_KEY)." };
+      }
+      fal.config({ credentials: key });
+
+      const urls = resolveImageUrlsForEdit(messages, image_urls);
+      if (!urls.length) {
+        return {
+          error:
+            "No image attachments found. Ask the user to attach at least one image, then try again.",
+        };
+      }
+
+      try {
+        const result = await fal.subscribe(FAL_NANO_BANANA_EDIT, {
+          input: {
+            prompt,
+            image_urls: urls,
+            aspect_ratio: aspect_ratio ?? "auto",
+            resolution: resolution ?? "1K",
+            output_format: "png",
+            num_images: 1,
+          },
+          logs: false,
+        });
+
+        const url = pickImageUrl(result.data);
+        if (!url) {
+          return { error: "Image edit returned no URL." };
+        }
+
+        return {
+          mediaKind: "image" as const,
+          mediaUrl: url,
+          caption: prompt.slice(0, 200),
+          model: "nano-banana-2-edit",
+        };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Image editing failed.";
+        return { error: msg };
+      }
+    },
+  });
+}
+
 const generateVideoTool = tool({
   description:
     "Create a short video from a text prompt. Choose standard vs premium yourself from context—never ask the user which model or tier to use.",
@@ -206,11 +342,12 @@ const generateVideoTool = tool({
   },
 });
 
-/** Image + video generation via fal.ai when `FAL_KEY` is set. */
-export function getFalMediaTools(): ToolSet {
+/** Image generation, Nano Banana image edit, and video via fal.ai when `FAL_KEY` is set. */
+export function getFalMediaTools(messages: UIMessage[]): ToolSet {
   if (!getFalKey()) return {};
   return {
     generate_image: generateImageTool,
+    edit_image: buildEditImageTool(messages),
     generate_video: generateVideoTool,
   };
 }

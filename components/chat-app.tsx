@@ -15,6 +15,7 @@ import {
   type AppChatSettings,
   defaultAppChatSettings,
 } from "@/lib/user-settings";
+import { ActiveChatControlsProvider } from "@/components/active-chat-controls-context";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { ChatSessionView } from "@/components/chat-session-view";
 
@@ -67,23 +68,36 @@ export function ChatApp() {
   }, []);
 
   const handleNewChat = useCallback(() => {
-    const s = makeEmptySession();
     setSessions((prev) => {
+      const existingEmpty = prev.find((s) => s.messages.length === 0);
+      if (existingEmpty) {
+        setActiveId(existingEmpty.id);
+        return prev;
+      }
+      const s = makeEmptySession();
       const next = [...prev, s];
       saveSessions(next);
+      setActiveId(s.id);
       return next;
     });
-    setActiveId(s.id);
   }, []);
+
+  const handleRenameSession = useCallback(
+    (id: string, title: string) => {
+      const trimmed = title.trim();
+      mergeSession(id, {
+        title: trimmed.length ? trimmed.slice(0, 120) : "New chat",
+        titleMode: "manual",
+      });
+    },
+    [mergeSession],
+  );
 
   const handleDelete = useCallback((id: string) => {
     setSessions((prev) => {
+      if (prev.length <= 1) return prev;
       let next = prev.filter((s) => s.id !== id);
-      if (next.length === 0) {
-        const fresh = makeEmptySession();
-        next = [fresh];
-        setActiveId(fresh.id);
-      } else if (activeId === id) {
+      if (activeId === id) {
         const fallback = [...next].sort((a, b) => b.updatedAt - a.updatedAt)[0];
         setActiveId(fallback.id);
       }
@@ -96,6 +110,7 @@ export function ChatApp() {
     const newSession: ChatSession = {
       id: generateId(),
       title: titleHint.slice(0, 80),
+      titleMode: "auto",
       updatedAt: Date.now(),
       messages: forkedMessages,
     };
@@ -117,23 +132,30 @@ export function ChatApp() {
     );
   }
 
+  const canCreateNewChat = !sessions.some((s) => s.messages.length === 0);
+
   return (
-    <div className="flex h-full min-h-0 flex-1">
-      <ChatSidebar
-        sessions={sessions}
-        activeId={activeId}
-        onSelect={setActiveId}
-        onNew={handleNewChat}
-        onDelete={handleDelete}
-      />
-      <ChatSessionView
-        key={active.id}
-        session={active}
-        appSettings={appSettings}
-        onAppSettingsChange={updateAppSettings}
-        onPersist={mergeSession}
-        onFork={handleFork}
-      />
-    </div>
+    <ActiveChatControlsProvider>
+      <div className="flex h-full min-h-0 flex-1">
+        <ChatSidebar
+          sessions={sessions}
+          activeId={activeId}
+          canCreateNewChat={canCreateNewChat}
+          onSelect={setActiveId}
+          onNew={handleNewChat}
+          onDelete={handleDelete}
+          onRenameSession={handleRenameSession}
+          appSettings={appSettings}
+        />
+        <ChatSessionView
+          key={active.id}
+          session={active}
+          appSettings={appSettings}
+          onAppSettingsChange={updateAppSettings}
+          onPersist={mergeSession}
+          onFork={handleFork}
+        />
+      </div>
+    </ActiveChatControlsProvider>
   );
 }

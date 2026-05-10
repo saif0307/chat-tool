@@ -7,6 +7,7 @@ import {
   resolveEffectiveModel,
   type ProviderId,
 } from "@/lib/models";
+import { Tooltip } from "@/components/tooltip";
 
 export type SettingsDraft = {
   provider: ProviderId;
@@ -109,9 +110,11 @@ export function ChatSettingsModal({
               onChange={(e) => onChangeDraft({ maxMode: e.target.checked })}
               className="accent-foreground h-4 w-4 rounded border"
             />
-            <span title="Uses the strongest model for this provider and longer outputs">
-              Max mode
-            </span>
+            <Tooltip content="Uses the strongest model for this provider and longer outputs">
+              <span className="cursor-help border-b border-dotted border-foreground/25">
+                Max mode
+              </span>
+            </Tooltip>
           </label>
 
           <label className="text-foreground/65 flex cursor-pointer items-center gap-2 text-sm">
@@ -121,9 +124,11 @@ export function ChatSettingsModal({
               onChange={(e) => onChangeDraft({ enableWebSearch: e.target.checked })}
               className="accent-foreground h-4 w-4 rounded border"
             />
-            <span title="Provider-hosted web search when available">
-              Live web search
-            </span>
+            <Tooltip content="Provider-hosted web search when available">
+              <span className="cursor-help border-b border-dotted border-foreground/25">
+                Live web search
+              </span>
+            </Tooltip>
           </label>
 
           {!draft.maxMode && (
@@ -171,7 +176,7 @@ export function ChatSettingsModal({
           <button
             type="button"
             onClick={onClose}
-            className="border-foreground/15 bg-background text-foreground hover:bg-foreground/5 rounded-lg border px-4 py-2 text-sm font-medium"
+            className="text-foreground/75 hover:bg-foreground/10 hover:text-foreground rounded-lg px-4 py-2 text-sm font-medium transition-colors"
           >
             Cancel
           </button>

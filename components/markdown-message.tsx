@@ -7,6 +7,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import "highlight.js/styles/github-dark.css";
 import { sanitizeAssistantMarkdown } from "@/lib/sanitize-assistant-markdown";
+import { PreviewableImage } from "@/components/image-lightbox";
 
 /** Stable plugin tuples — new arrays each render force react-markdown to redo expensive work. */
 const remarkPlugins = [remarkGfm];
@@ -81,6 +82,19 @@ const markdownComponents: Components = {
       >
         {children}
       </code>
+    );
+  },
+  img: ({ src, alt, ...props }) => {
+    if (!src || typeof src !== "string") return null;
+    return (
+      <span className="my-3 block">
+        <PreviewableImage
+          src={src}
+          alt={typeof alt === "string" ? alt : ""}
+          className="max-h-[min(70vh,32rem)] max-w-full rounded-lg object-contain"
+          {...props}
+        />
+      </span>
     );
   },
 };
