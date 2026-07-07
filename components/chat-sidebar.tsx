@@ -23,6 +23,8 @@ type Props = {
   canCreateNewChat: boolean;
   appSettings: AppChatSettings;
   onSelect: (id: string) => void;
+  /** Reorder sidebar only after a tab click once the pointer leaves the menu. */
+  onBumpToTop: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
   onRenameSession: (id: string, title: string) => void;
@@ -59,6 +61,7 @@ export function ChatSidebar({
   canCreateNewChat,
   appSettings,
   onSelect,
+  onBumpToTop,
   onNew,
   onDelete,
   onRenameSession,
@@ -106,6 +109,22 @@ export function ChatSidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
+  const pendingSortIdRef = useRef<string | null>(null);
+
+  const selectSession = useCallback(
+    (id: string) => {
+      pendingSortIdRef.current = id;
+      onSelect(id);
+    },
+    [onSelect],
+  );
+
+  const flushPendingSort = useCallback(() => {
+    const id = pendingSortIdRef.current;
+    if (!id) return;
+    pendingSortIdRef.current = null;
+    onBumpToTop(id);
+  }, [onBumpToTop]);
 
   const fallbackSummary = useMemo(() => {
     const model = resolveEffectiveModel(
@@ -427,7 +446,7 @@ export function ChatSidebar({
                 <Tooltip content="Double-click to rename">
                   <button
                     type="button"
-                    onClick={() => onSelect(s.id)}
+                    onClick={() => selectSession(s.id)}
                     onDoubleClick={(e) => {
                       e.preventDefault();
                       setDraftTitle(s.title);
@@ -521,6 +540,7 @@ export function ChatSidebar({
 
   return (
     <aside
+      onMouseLeave={flushPendingSort}
       className={`border-foreground/10 bg-background flex min-h-0 shrink-0 flex-col overflow-hidden border-r transition-[width] duration-200 ease-out ${
         expanded ? "w-[min(100%,280px)]" : "w-14"
       }`}

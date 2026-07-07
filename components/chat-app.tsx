@@ -18,6 +18,13 @@ import {
 import { ActiveChatControlsProvider } from "@/components/active-chat-controls-context";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { ChatSessionView } from "@/components/chat-session-view";
+import {
+  composerDraftHasContent,
+  emptyComposerDraft,
+  type ComposerDraft,
+} from "@/lib/composer-draft";
+
+const EMPTY_CHAT_CLEANUP_MS = 30_000;
 
 function makeEmptySession(): ChatSession {
   const id = generateId();
@@ -36,6 +43,10 @@ export function ChatApp() {
   const [appSettings, setAppSettings] = useState<AppChatSettings>(defaultAppChatSettings);
   /** Apply after `sessions` commits — avoids active id updating before / without the new session row. */
   const pendingActivateIdRef = useRef<string | null>(null);
+  const composerDraftsRef = useRef<Map<string, ComposerDraft>>(new Map());
+  const emptyChatCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -75,6 +86,63 @@ export function ChatApp() {
     setActiveId(id);
   }, []);
 
+  const getComposerDraft = useCallback((id: string): ComposerDraft => {
+    return composerDraftsRef.current.get(id) ?? emptyComposerDraft();
+  }, []);
+
+  const setComposerDraft = useCallback((id: string, draft: ComposerDraft) => {
+    if (!composerDraftHasContent(draft)) {
+      composerDraftsRef.current.delete(id);
+      return;
+    }
+    composerDraftsRef.current.set(id, draft);
+  }, []);
+
+  const clearComposerDraft = useCallback((id: string) => {
+    composerDraftsRef.current.delete(id);
+  }, []);
+
+  /** Drop abandoned empty chats shortly after the user switches away. */
+  useEffect(() => {
+    if (emptyChatCleanupTimerRef.current) {
+      clearTimeout(emptyChatCleanupTimerRef.current);
+      emptyChatCleanupTimerRef.current = null;
+    }
+
+    const emptySession = sessions.find((s) => s.messages.length === 0);
+    if (!emptySession || emptySession.id === activeId || sessions.length <= 1) {
+      return;
+    }
+
+    const emptyId = emptySession.id;
+    const draft = composerDraftsRef.current.get(emptyId);
+    if (draft && composerDraftHasContent(draft)) {
+      return;
+    }
+
+    emptyChatCleanupTimerRef.current = setTimeout(() => {
+      emptyChatCleanupTimerRef.current = null;
+      const pendingDraft = composerDraftsRef.current.get(emptyId);
+      if (pendingDraft && composerDraftHasContent(pendingDraft)) return;
+      setSessions((prev) => {
+        if (prev.length <= 1) return prev;
+        const target = prev.find((s) => s.id === emptyId);
+        if (!target || target.messages.length > 0) return prev;
+        const next = prev.filter((s) => s.id !== emptyId);
+        saveSessions(next);
+        composerDraftsRef.current.delete(emptyId);
+        return next;
+      });
+    }, EMPTY_CHAT_CLEANUP_MS);
+
+    return () => {
+      if (emptyChatCleanupTimerRef.current) {
+        clearTimeout(emptyChatCleanupTimerRef.current);
+        emptyChatCleanupTimerRef.current = null;
+      }
+    };
+  }, [activeId]);
+
   const updateAppSettings = useCallback((next: AppChatSettings) => {
     const normalized = normalizeAppChatSettings(next);
     setAppSettings(normalized);
@@ -84,7 +152,17 @@ export function ChatApp() {
   const mergeSession = useCallback((id: string, patch: Partial<ChatSession>) => {
     setSessions((prev) => {
       const next = prev.map((s) =>
-        s.id === id ? { ...s, ...patch, updatedAt: Date.now() } : s,
+        s.id === id ? { ...s, ...patch } : s,
+      );
+      saveSessions(next);
+      return next;
+    });
+  }, []);
+
+  const bumpSessionToTop = useCallback((id: string) => {
+    setSessions((prev) => {
+      const next = prev.map((s) =>
+        s.id === id ? { ...s, updatedAt: Date.now() } : s,
       );
       saveSessions(next);
       return next;
@@ -118,6 +196,7 @@ export function ChatApp() {
   );
 
   const handleDelete = useCallback((id: string) => {
+    composerDraftsRef.current.delete(id);
     setSessions((prev) => {
       if (prev.length <= 1) return prev;
       const next = prev.filter((s) => s.id !== id);
@@ -166,6 +245,7 @@ export function ChatApp() {
           activeId={activeId}
           canCreateNewChat={canCreateNewChat}
           onSelect={selectSession}
+          onBumpToTop={bumpSessionToTop}
           onNew={handleNewChat}
           onDelete={handleDelete}
           onRenameSession={handleRenameSession}
@@ -178,6 +258,9 @@ export function ChatApp() {
           onAppSettingsChange={updateAppSettings}
           onPersist={mergeSession}
           onFork={handleFork}
+          getComposerDraft={getComposerDraft}
+          setComposerDraft={setComposerDraft}
+          clearComposerDraft={clearComposerDraft}
         />
       </div>
     </ActiveChatControlsProvider>

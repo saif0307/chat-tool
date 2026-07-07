@@ -46,6 +46,9 @@ import {
   type AppChatSettings,
 } from "@/lib/user-settings";
 import { Tooltip } from "@/components/tooltip";
+import {
+  type ComposerDraft,
+} from "@/lib/composer-draft";
 
 const MAX_ATTACH_BYTES = 12 * 1024 * 1024;
 const MAX_ATTACH_FILES = 8;
@@ -97,6 +100,10 @@ function fileListFromFiles(files: File[]): FileList {
 
 function filesFromClipboard(data: DataTransfer | null): File[] {
   if (!data) return [];
+  const types = [...data.types];
+  // Plain text from a browser field is text/plain only — never treat as file paste.
+  if (!types.includes("Files") && types.includes("text/plain")) return [];
+
   const fromItems: File[] = [];
   for (const item of data.items) {
     if (item.kind === "file") {
@@ -111,30 +118,22 @@ function filesFromClipboard(data: DataTransfer | null): File[] {
 type PastedSnippet = { id: string; text: string };
 
 /**
- * Detect paste from a code editor / file buffer vs a plain browser field.
- * Editors (VS Code, Cursor, JetBrains, etc.) usually put extra MIME types on the clipboard:
- * at minimum `text/html` next to `text/plain` (syntax-highlighted HTML). Copying from a normal
- * `<input>` / `<textarea>` in the browser is almost always `text/plain` only.
- * Some builds also register custom types whose names include `vscode` or similar.
+ * Detect paste from a code editor (VS Code, Cursor, etc.) vs a normal browser field.
+ * VS Code registers `vscode-editor-data` (JSON metadata). Browsers also put `text/html` on
+ * the clipboard for rich selections, so `text/html` alone is not a reliable editor signal.
  */
 function clipboardLooksLikeEditorPaste(data: DataTransfer): boolean {
   const types = [...data.types];
   if (types.length === 0) return false;
   const lower = types.map((t) => t.toLowerCase());
 
-  if (
-    lower.some((t) =>
-      /vscode|vscode-editor|cursor-editor|jetbrains|android-studio/.test(t),
-    )
-  ) {
-    return true;
+  if (lower.includes("vscode-editor-data")) {
+    return Boolean(data.getData("vscode-editor-data")?.trim());
   }
 
-  if (lower.includes("text/html")) {
-    return true;
-  }
-
-  return false;
+  return lower.some((t) =>
+    /vscode-editor|cursor-editor|jetbrains|android-studio/.test(t),
+  );
 }
 
 const USER_MESSAGE_COLLAPSE_CHARS = 380;
@@ -189,6 +188,9 @@ type Props = {
   onAppSettingsChange: (next: AppChatSettings) => void;
   onPersist: (id: string, patch: Partial<ChatSession>) => void;
   onFork: (messages: UIMessage[], titleHint: string) => void;
+  getComposerDraft: (sessionId: string) => ComposerDraft;
+  setComposerDraft: (sessionId: string, draft: ComposerDraft) => void;
+  clearComposerDraft: (sessionId: string) => void;
 };
 
 export function ChatSessionView({
@@ -197,6 +199,9 @@ export function ChatSessionView({
   onAppSettingsChange,
   onPersist,
   onFork,
+  getComposerDraft,
+  setComposerDraft,
+  clearComposerDraft,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const d0 = defaultAppChatSettings();
@@ -207,10 +212,13 @@ export function ChatSessionView({
     enableWebSearch: d0.enableWebSearch,
     customInstructions: d0.customInstructions,
   }));
-  const [input, setInput] = useState("");
+  const savedDraft = getComposerDraft(session.id);
+  const [input, setInput] = useState(savedDraft.input);
   const [attachError, setAttachError] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const [pastedSnippets, setPastedSnippets] = useState<PastedSnippet[]>([]);
+  const [attachments, setAttachments] = useState<File[]>(savedDraft.attachments);
+  const [pastedSnippets, setPastedSnippets] = useState<PastedSnippet[]>(
+    savedDraft.pastedSnippets,
+  );
   /** False while user reads older messages — use live `messages` (no defer) for stable scroll. */
   const [followingStream, setFollowingStream] = useState(true);
 
@@ -225,6 +233,10 @@ export function ChatSessionView({
   /** While streaming: set true when user scrolls up — blocks programmatic snap until they return to the tail. */
   const autoFollowPausedRef = useRef(false);
   const prevScrollTopRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setComposerDraft(session.id, { input, attachments, pastedSnippets });
+  }, [session.id, input, attachments, pastedSnippets, setComposerDraft]);
 
   /** Match `max-h-[min(70vh,28rem)]` — do not use getComputedStyle(maxHeight); `min()` often breaks parseFloat. */
   const getComposerTextareaMaxPx = useCallback(() => {
@@ -611,6 +623,7 @@ export function ChatSessionView({
       setInput("");
       setAttachments([]);
       setPastedSnippets([]);
+      clearComposerDraft(session.id);
       if (fileInputRef.current) fileInputRef.current.value = "";
       clearError();
       await sendMessage({
@@ -635,6 +648,8 @@ export function ChatSessionView({
       sendMessage,
       clearError,
       validateFiles,
+      clearComposerDraft,
+      session.id,
     ],
   );
 
