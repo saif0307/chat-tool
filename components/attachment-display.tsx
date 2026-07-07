@@ -45,7 +45,7 @@ export function MessageAttachmentPart({ url, filename, mediaType }: MessageFileP
             data={url}
             type="application/pdf"
             aria-label={label}
-            className="bg-background min-h-[420px] w-full rounded-lg border border-dashed"
+            className="bg-background min-h-[min(50vh,240px)] w-full rounded-lg border border-dashed sm:min-h-[420px]"
           >
             <div className="text-foreground/75 flex flex-col gap-2 p-4 text-sm">
               <p>PDF preview is not available in this browser.</p>

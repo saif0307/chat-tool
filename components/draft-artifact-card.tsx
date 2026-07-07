@@ -80,7 +80,7 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
       className="border-foreground/15 bg-foreground/6 mt-4 overflow-hidden rounded-2xl border shadow-inner"
       data-draft-artifact
     >
-      <div className="border-foreground/10 flex items-center justify-between gap-2 border-b px-3 py-2">
+      <div className="border-foreground/10 flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 sm:flex-nowrap">
         <button
           type="button"
           onClick={() => (editing ? exitEdit() : enterEdit())}
@@ -102,7 +102,7 @@ export function DraftArtifactCard({ body, format, streaming }: Props) {
           </svg>
           {editing ? "Done" : "Edit"}
         </button>
-        <span className="text-foreground/60 min-w-0 flex-1 truncate text-center text-xs font-medium">
+        <span className="text-foreground/60 order-3 min-w-0 basis-full truncate text-center text-xs font-medium sm:order-none sm:flex-1">
           {displayTitle}
           {streaming ? (
             <span className="text-foreground/45 ml-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-500 align-middle" />

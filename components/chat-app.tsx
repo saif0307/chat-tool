@@ -41,6 +41,7 @@ export function ChatApp() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [appSettings, setAppSettings] = useState<AppChatSettings>(defaultAppChatSettings);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   /** Apply after `sessions` commits — avoids active id updating before / without the new session row. */
   const pendingActivateIdRef = useRef<string | null>(null);
   const composerDraftsRef = useRef<Map<string, ComposerDraft>>(new Map());
@@ -84,6 +85,7 @@ export function ChatApp() {
   const selectSession = useCallback((id: string) => {
     pendingActivateIdRef.current = null;
     setActiveId(id);
+    setMobileNavOpen(false);
   }, []);
 
   const getComposerDraft = useCallback((id: string): ComposerDraft => {
@@ -101,6 +103,15 @@ export function ChatApp() {
   const clearComposerDraft = useCallback((id: string) => {
     composerDraftsRef.current.delete(id);
   }, []);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileNavOpen]);
 
   /** Drop abandoned empty chats shortly after the user switches away. */
   useEffect(() => {
@@ -239,11 +250,21 @@ export function ChatApp() {
 
   return (
     <ActiveChatControlsProvider>
-      <div className="flex h-full min-h-0 flex-1">
+      <div className="relative flex h-full min-h-0 flex-1">
+        {mobileNavOpen ? (
+          <button
+            type="button"
+            className="fixed inset-0 z-30 bg-black/45 md:hidden"
+            aria-label="Close menu"
+            onClick={() => setMobileNavOpen(false)}
+          />
+        ) : null}
         <ChatSidebar
           sessions={sessions}
           activeId={activeId}
           canCreateNewChat={canCreateNewChat}
+          mobileNavOpen={mobileNavOpen}
+          onCloseMobileNav={() => setMobileNavOpen(false)}
           onSelect={selectSession}
           onBumpToTop={bumpSessionToTop}
           onNew={handleNewChat}
@@ -261,6 +282,7 @@ export function ChatApp() {
           getComposerDraft={getComposerDraft}
           setComposerDraft={setComposerDraft}
           clearComposerDraft={clearComposerDraft}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
         />
       </div>
     </ActiveChatControlsProvider>

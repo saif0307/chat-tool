@@ -43,6 +43,20 @@ body {
   color: var(--foreground);
 }
 
+/* iOS notch / home indicator */
+.safe-area-pb {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.safe-area-pt {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+.safe-area-px {
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+}
+
 /*
  * Chat Markdown — Tailwind Preflight sets ul/ol/menu { list-style: none }, which makes
  * bullet and numbered lists look like plain paragraphs. Restore markers inside the

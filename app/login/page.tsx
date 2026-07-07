@@ -39,11 +39,11 @@ function LoginForm() {
   }
 
   return (
-    <div className="bg-background text-foreground relative flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-      <div className="absolute right-4 top-4 md:right-8 md:top-8">
+    <div className="bg-background text-foreground relative flex min-h-dvh flex-col items-center justify-center px-4 py-10 safe-area-px">
+      <div className="absolute right-4 top-4 safe-area-pt md:right-8 md:top-8">
         <ThemeToggle />
       </div>
-      <div className="border-foreground/10 bg-background w-full max-w-sm rounded-2xl border p-8 shadow-sm">
+      <div className="border-foreground/10 bg-background w-full max-w-sm rounded-2xl border p-6 shadow-sm sm:p-8">
         <h1 className="text-lg font-semibold tracking-tight">Sign in</h1>
         <p className="text-foreground/60 mt-1 text-sm">
           Enter the site password to use the chat.

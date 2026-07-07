@@ -29,7 +29,7 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-[max(1rem,env(safe-area-inset-top))_max(1rem,env(safe-area-inset-right))_max(1rem,env(safe-area-inset-bottom))_max(1rem,env(safe-area-inset-left))] backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-label={alt || "Image preview"}
@@ -38,7 +38,7 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
       <button
         type="button"
         onClick={onClose}
-        className="absolute right-3 top-3 z-[201] rounded-full p-2 text-2xl leading-none text-zinc-200/90 transition-colors hover:bg-white/10 hover:text-white"
+        className="absolute right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-[201] rounded-full p-2 text-2xl leading-none text-zinc-200/90 transition-colors hover:bg-white/10 hover:text-white"
         aria-label="Close preview"
       >
         ×

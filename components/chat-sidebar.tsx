@@ -22,6 +22,8 @@ type Props = {
   activeId: string | null;
   canCreateNewChat: boolean;
   appSettings: AppChatSettings;
+  mobileNavOpen: boolean;
+  onCloseMobileNav: () => void;
   onSelect: (id: string) => void;
   /** Reorder sidebar only after a tab click once the pointer leaves the menu. */
   onBumpToTop: (id: string) => void;
@@ -60,6 +62,8 @@ export function ChatSidebar({
   activeId,
   canCreateNewChat,
   appSettings,
+  mobileNavOpen,
+  onCloseMobileNav,
   onSelect,
   onBumpToTop,
   onNew,
@@ -125,6 +129,20 @@ export function ChatSidebar({
     pendingSortIdRef.current = null;
     onBumpToTop(id);
   }, [onBumpToTop]);
+
+  const closeSidebar = useCallback(() => {
+    flushPendingSort();
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+      onCloseMobileNav();
+      return;
+    }
+    persistExpanded(false);
+  }, [flushPendingSort, onCloseMobileNav, persistExpanded]);
+
+  const handleNewChat = useCallback(() => {
+    onNew();
+    onCloseMobileNav();
+  }, [onNew, onCloseMobileNav]);
 
   const fallbackSummary = useMemo(() => {
     const model = resolveEffectiveModel(
@@ -215,7 +233,7 @@ export function ChatSidebar({
         <Tooltip content={newChatTooltip} placement="right">
           <button
             type="button"
-            onClick={onNew}
+            onClick={handleNewChat}
             disabled={!canCreateNewChat}
             aria-label="New chat"
             className={iconBtnClass}
@@ -344,7 +362,7 @@ export function ChatSidebar({
   );
 
   const expandedPanel = (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col safe-area-pt">
       <div className="border-foreground/10 flex shrink-0 items-center gap-2 border-b px-2 py-1.5">
         <Tooltip
           content="Close sidebar"
@@ -352,7 +370,7 @@ export function ChatSidebar({
         >
           <button
             type="button"
-            onClick={toggleExpanded}
+            onClick={closeSidebar}
             aria-expanded={expanded}
             aria-label="Close sidebar"
             className={iconBtnClass}
@@ -385,7 +403,7 @@ export function ChatSidebar({
         <Tooltip content={newChatTooltip}>
           <button
             type="button"
-            onClick={onNew}
+            onClick={handleNewChat}
             disabled={!canCreateNewChat}
             className="bg-foreground text-background hover:opacity-90 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-45"
           >
@@ -459,25 +477,54 @@ export function ChatSidebar({
                 </Tooltip>
               )}
               {allowDelete && editingId !== s.id ? (
-                <Tooltip content="Delete chat">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(s.id);
-                    }}
-                    className="text-foreground/35 hover:bg-foreground/10 hover:text-foreground/90 shrink-0 rounded-md p-1.5 text-lg leading-none opacity-0 transition-opacity group-hover:opacity-100"
-                  >
-                    ×
-                  </button>
-                </Tooltip>
+                <div className="flex shrink-0 items-center">
+                  <Tooltip content="Rename chat">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDraftTitle(s.title);
+                        setEditingId(s.id);
+                      }}
+                      className="text-foreground/45 hover:bg-foreground/10 hover:text-foreground/90 rounded-md p-1.5 md:hidden"
+                      aria-label="Rename chat"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-4 w-4"
+                        aria-hidden
+                      >
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Delete chat">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(s.id);
+                      }}
+                      className="text-foreground/45 hover:bg-foreground/10 hover:text-foreground/90 shrink-0 rounded-md p-1.5 text-lg leading-none opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+                    >
+                      ×
+                    </button>
+                  </Tooltip>
+                </div>
               ) : null}
             </div>
           ))
         )}
       </nav>
 
-      <div className="border-foreground/10 mt-auto flex shrink-0 flex-col gap-1.5 border-t px-2 py-2">
+      <div className="border-foreground/10 mt-auto flex shrink-0 flex-col gap-1.5 border-t px-2 py-2 safe-area-pb">
         <Tooltip content="Model and options for the active chat">
           <p className="text-foreground/45 cursor-default truncate px-0.5 text-[10px] leading-tight tabular-nums">
             {summaryLine}
@@ -541,11 +588,16 @@ export function ChatSidebar({
   return (
     <aside
       onMouseLeave={flushPendingSort}
-      className={`border-foreground/10 bg-background flex min-h-0 shrink-0 flex-col overflow-hidden border-r transition-[width] duration-200 ease-out ${
-        expanded ? "w-[min(100%,280px)]" : "w-14"
+      className={`border-foreground/10 bg-background flex min-h-0 flex-col overflow-hidden border-r transition-transform duration-200 ease-out md:shrink-0 ${
+        mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+      } fixed inset-y-0 left-0 z-40 w-[min(85vw,280px)] md:static md:z-auto md:translate-x-0 ${
+        expanded ? "md:w-[min(100%,280px)]" : "md:w-14"
       }`}
     >
-      {!expanded ? collapsedRail : expandedPanel}
+      <div className="flex min-h-0 flex-1 flex-col md:hidden">{expandedPanel}</div>
+      <div className="hidden min-h-0 flex-1 flex-col md:flex">
+        {!expanded ? collapsedRail : expandedPanel}
+      </div>
     </aside>
   );
 }

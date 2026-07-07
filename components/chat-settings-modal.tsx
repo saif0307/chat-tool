@@ -41,7 +41,12 @@ export function ChatSettingsModal({
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
   }, [open, onClose]);
 
   useEffect(() => {
@@ -54,7 +59,7 @@ export function ChatSettingsModal({
   const effectiveModel = resolveEffectiveModel(draft.provider, draft.model, draft.maxMode);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
@@ -66,9 +71,9 @@ export function ChatSettingsModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="border-foreground/12 bg-background text-foreground relative z-10 flex max-h-[min(90vh,720px)] w-full max-w-lg flex-col gap-4 overflow-hidden rounded-2xl border shadow-xl"
+        className="border-foreground/12 bg-background text-foreground relative z-10 flex max-h-[min(92dvh,720px)] w-full max-w-lg flex-col gap-4 overflow-hidden rounded-t-2xl border shadow-xl sm:max-h-[min(90vh,720px)] sm:rounded-2xl"
       >
-        <div className="border-foreground/10 flex flex-shrink-0 items-start justify-between gap-3 border-b px-5 py-4">
+        <div className="border-foreground/10 flex shrink-0 items-start justify-between gap-3 border-b px-4 py-4 sm:px-5">
           <div>
             <h2 id={titleId} className="text-lg font-semibold tracking-tight">
               Settings
@@ -87,7 +92,7 @@ export function ChatSettingsModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 pb-2">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-2 sm:px-5">
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-foreground/75 font-medium">Provider</span>
             <select
@@ -172,7 +177,7 @@ export function ChatSettingsModal({
           </div>
         </div>
 
-        <div className="border-foreground/10 flex flex-shrink-0 justify-end gap-2 border-t px-5 py-4">
+        <div className="border-foreground/10 flex shrink-0 flex-wrap justify-end gap-2 border-t px-4 py-4 safe-area-pb sm:px-5">
           <button
             type="button"
             onClick={onClose}

@@ -191,6 +191,7 @@ type Props = {
   getComposerDraft: (sessionId: string) => ComposerDraft;
   setComposerDraft: (sessionId: string, draft: ComposerDraft) => void;
   clearComposerDraft: (sessionId: string) => void;
+  onOpenMobileNav: () => void;
 };
 
 export function ChatSessionView({
@@ -202,6 +203,7 @@ export function ChatSessionView({
   getComposerDraft,
   setComposerDraft,
   clearComposerDraft,
+  onOpenMobileNav,
 }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const d0 = defaultAppChatSettings();
@@ -778,16 +780,67 @@ export function ChatSessionView({
 
   const isLanding = messages.length === 0;
 
+  const mobileHeader = (
+    <header className="border-foreground/10 bg-zinc-50/95 dark:bg-background/95 safe-area-pt flex shrink-0 items-center gap-2 border-b px-3 py-2 backdrop-blur-sm md:hidden">
+      <button
+        type="button"
+        onClick={onOpenMobileNav}
+        aria-label="Open chats"
+        className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-5 w-5"
+          aria-hidden
+        >
+          <line x1="4" x2="20" y1="6" y2="6" />
+          <line x1="4" x2="20" y1="12" y2="12" />
+          <line x1="4" x2="20" y1="18" y2="18" />
+        </svg>
+      </button>
+      <h1 className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold">
+        {session.title}
+      </h1>
+      <button
+        type="button"
+        onClick={openSettings}
+        aria-label="Open settings"
+        className="text-foreground/70 hover:bg-foreground/10 hover:text-foreground inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-5 w-5"
+          aria-hidden
+        >
+          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+        </svg>
+      </button>
+    </header>
+  );
+
   const composerDock = (
     <div
       ref={composerDockRef}
       className={
         isLanding
-          ? "flex w-full justify-center"
-          : "absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 pb-4 pt-2"
+          ? "flex w-full justify-center px-1"
+          : "absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pt-2 safe-area-pb sm:px-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 before:-top-8 before:bg-gradient-to-t before:from-zinc-50 before:via-zinc-50/80 before:to-transparent dark:before:from-background dark:before:via-background/80"
       }
     >
-      <div className={`mx-auto flex w-full flex-col gap-3 ${CHAT_COLUMN_MAX}`}>
+      <div className={`relative z-10 mx-auto flex w-full flex-col gap-3 ${CHAT_COLUMN_MAX}`}>
       {error && (
         <div
           role="alert"
@@ -826,7 +879,7 @@ export function ChatSessionView({
           className="hidden"
           disabled={busy}
         />
-        <div className="border-foreground/15 bg-white dark:bg-zinc-700 flex flex-col gap-2 rounded-[28px] border px-3 py-2 shadow-sm">
+        <div className="border-foreground/15 bg-white dark:bg-zinc-700 flex flex-col gap-2 rounded-[24px] border px-2.5 py-2 shadow-sm sm:rounded-[28px] sm:px-3">
           {(attachments.length > 0 || pastedSnippets.length > 0) && (
             <div className="flex flex-wrap gap-2 px-1 pt-0.5 pb-1">
               {attachments.map((file, idx) => (
@@ -940,10 +993,11 @@ export function ChatSessionView({
       onDragOver={onDragOverChat}
       onDrop={onDropFiles}
     >
+      {mobileHeader}
       {isLanding ? (
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-10 px-4 pb-12 pt-8">
-            <h2 className="text-foreground max-w-[min(100%,48rem)] text-center text-3xl font-semibold tracking-tight md:text-4xl">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 px-3 pb-8 pt-4 sm:gap-10 sm:px-4 sm:pb-12 sm:pt-8">
+            <h2 className="text-foreground max-w-[min(100%,48rem)] text-center text-2xl font-semibold tracking-tight sm:text-3xl md:text-4xl">
               What would you like to do today?
             </h2>
             {composerDock}
@@ -953,7 +1007,7 @@ export function ChatSessionView({
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           <div
             ref={messagesScrollRef}
-            className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-4 pt-4 pr-1 [scrollbar-gutter:stable] [overflow-anchor:none]"
+            className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-y-contain rounded-xl border border-transparent px-3 pt-3 pr-1 [scrollbar-gutter:stable] [overflow-anchor:none] sm:gap-4 sm:px-4 sm:pt-4"
           >
           {renderMessages.map((m, idx) => {
             const inlinedMeta =
@@ -980,7 +1034,7 @@ export function ChatSessionView({
                   }
                 >
                   <article
-                    className={`flex min-w-0 flex-col gap-2 rounded-3xl border px-5 py-4 ${
+                    className={`flex min-w-0 flex-col gap-2 rounded-3xl border px-4 py-3 sm:px-5 sm:py-4 ${
                       m.role === "user"
                         ? "border-foreground/10 bg-white dark:bg-[#2f2f2f] max-w-[min(100%,28rem)]"
                         : "border-foreground/10 w-full border bg-white shadow-sm dark:bg-[#2f2f2f]"
