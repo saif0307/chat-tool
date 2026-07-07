@@ -26,7 +26,7 @@ function Spinner() {
   );
 }
 
-function FalMediaToolbar({ url, kind }: { url: string; kind: "image" | "video" }) {
+function MediaToolbar({ url, kind }: { url: string; kind: "image" | "video" }) {
   const [busy, setBusy] = useState(false);
 
   const download = useCallback(async () => {
@@ -104,12 +104,15 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
     part.type.includes("write_workspace_file") ||
     part.type === "tool-write_workspace_file";
 
-  const isFalImage =
+  const isMediaImage =
     part.type.includes("generate_image") || part.type === "tool-generate_image";
-  const isFalEdit =
+  const isMediaEdit =
     part.type.includes("edit_image") || part.type === "tool-edit_image";
-  const isFalVideo =
-    part.type.includes("generate_video") || part.type === "tool-generate_video";
+  const isMediaVideo =
+    part.type.includes("generate_video") ||
+    part.type.includes("extend_video") ||
+    part.type === "tool-generate_video" ||
+    part.type === "tool-extend_video";
 
   if (part.state === "output-error" || part.errorText) {
     return (
@@ -145,12 +148,14 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
           ? "Searching the web…"
           : isWriteWorkspace
             ? "Preparing file…"
-            : isFalEdit
+            : isMediaEdit
               ? "Editing image…"
-              : isFalImage
+              : isMediaImage
                 ? "Creating image…"
-                : isFalVideo
-                  ? "Rendering video…"
+                : isMediaVideo
+                  ? part.type.includes("extend")
+                    ? "Extending video…"
+                    : "Rendering video…"
                   : `Calling ${title}…`;
     return (
       <div className="border-sky-500/30 bg-sky-500/[0.07] mb-3 flex gap-3 rounded-lg border px-3 py-2.5 text-sm shadow-sm">
@@ -180,21 +185,21 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
       results?: Array<{ rank?: number; title?: string; url?: string; snippet?: string }>;
     };
 
-    const falUrl =
+    const mediaUrl =
       typeof (out as { mediaUrl?: unknown }).mediaUrl === "string"
         ? (out as { mediaUrl: string }).mediaUrl
         : "";
-    const falKind = (out as { mediaKind?: unknown }).mediaKind;
+    const mediaKind = (out as { mediaKind?: unknown }).mediaKind;
 
     if (
-      falUrl &&
-      (falKind === "image" ||
-        falKind === "video" ||
-        isFalImage ||
-        isFalEdit ||
-        isFalVideo)
+      mediaUrl &&
+      (mediaKind === "image" ||
+        mediaKind === "video" ||
+        isMediaImage ||
+        isMediaEdit ||
+        isMediaVideo)
     ) {
-      const kind = falKind === "video" || isFalVideo ? "video" : "image";
+      const kind = mediaKind === "video" || isMediaVideo ? "video" : "image";
       const caption =
         typeof (out as { caption?: unknown }).caption === "string"
           ? (out as { caption: string }).caption
@@ -202,12 +207,16 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
       return (
         <div className="border-violet-500/30 bg-violet-500/[0.06] mb-3 overflow-hidden rounded-lg border shadow-sm">
           <div className="text-foreground border-violet-500/20 border-b px-3 py-2 text-sm font-medium">
-            {kind === "video" ? "Video" : "Image"} ready
+            {kind === "video"
+              ? part.type.includes("extend")
+                ? "Extended video ready"
+                : "Video ready"
+              : "Image ready"}
           </div>
           <div className="px-3 pb-3 pt-2">
             {kind === "video" ? (
               <video
-                src={falUrl}
+                src={mediaUrl}
                 controls
                 playsInline
                 className="bg-foreground/5 max-h-[min(70vh,520px)] w-full rounded-lg"
@@ -215,12 +224,12 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
               />
             ) : (
               <PreviewableImage
-                src={falUrl}
+                src={mediaUrl}
                 alt={caption || "Generated image"}
                 className="bg-foreground/5 max-h-[min(70vh,520px)] w-full rounded-lg object-contain"
               />
             )}
-            <FalMediaToolbar url={falUrl} kind={kind} />
+            <MediaToolbar url={mediaUrl} kind={kind} />
           </div>
         </div>
       );
@@ -312,10 +321,12 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
               ? "Fetching web results…"
               : isWriteWorkspace
                 ? "Working on your file…"
-                : isFalImage
+                : isMediaImage
                   ? "Creating image…"
-                  : isFalVideo
-                    ? "Rendering video…"
+                  : isMediaVideo
+                    ? part.type.includes("extend")
+                      ? "Extending video…"
+                      : "Rendering video…"
                     : `${title}…`}
           </div>
           {query ? (
@@ -335,9 +346,9 @@ export function ToolInvocationCard({ part }: { part: LooseToolPart }) {
             ? "Web search"
             : isWriteWorkspace
               ? "File"
-              : isFalImage
+              : isMediaImage
                 ? "Image"
-                : isFalVideo
+                : isMediaVideo
                   ? "Video"
                   : title}
         </span>

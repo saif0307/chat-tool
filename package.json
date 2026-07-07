@@ -6,13 +6,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:media-keys": "node scripts/test-media-keys.mjs",
+    "test:media-image": "node scripts/test-media-keys.mjs --generate-image"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
     "@ai-sdk/openai": "^3.0.53",
     "@ai-sdk/react": "^3.0.170",
-    "@fal-ai/client": "^1.10.1",
     "@tippyjs/react": "^4.2.6",
     "@vercel/blob": "^2.3.3",
     "ai": "^6.0.168",

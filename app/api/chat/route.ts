@@ -9,14 +9,14 @@ import {
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { ProviderId } from "@/lib/models";
-import { getFalMediaTools } from "@/lib/tools/fal-media";
+import { getMediaTools } from "@/lib/tools/media-tools";
 import { getFirecrawlWebSearchTools } from "@/lib/tools/web-search-firecrawl";
 import { getWorkspaceFileTools } from "@/lib/tools/workspace-files";
 import { expandInlinedMetadataForModel } from "@/lib/expand-user-message-metadata";
 import { emDashStreamFilter } from "@/lib/em-dash-stream-filter";
 import { getSystemPrompt } from "@/lib/system-prompt";
 
-/** Seconds — allow long fal.ai video jobs on hosts that support extended execution (see Vercel plan limits). */
+/** Seconds — allow long Replicate video jobs on hosts that support extended execution (see Vercel plan limits). */
 export const maxDuration = 300;
 
 /** Larger completions when Max mode is enabled in the UI. */
@@ -60,14 +60,15 @@ const SYSTEM_RESPONSE_BALANCE = [
   "- Make a reasonable attempt when details are unspecified (sensible dates, neutral wording); ask follow-ups sparingly and only when something material is missing.",
 ].join("\n");
 
-const SYSTEM_FAL_MEDIA = [
-  "Images and video (generate_image, edit_image, generate_video):",
-  "- generate_image: new image from a text prompt only (no reference photo).",
-  "- edit_image (Nano Banana 2 / fal.ai): When the user's message includes image attachment(s) and they ask to change, edit, restyle, recolor, transform, or ‘make it look like…’ that photo—call edit_image in this turn with a prompt that captures their goal. Source images are resolved from attachments automatically; never ask the user to paste URLs.",
-  "- edit_image behavior (critical): Prefer acting over interviewing. If the request is clear (e.g. ‘make this kitchen black themed’, ‘remove the person in the background’), call edit_image immediately—do not answer with only renovation tips, do not ask ‘would you like me to edit’, and do not ask matte vs glossy unless they explicitly asked you to compare finishes. After the tool returns, you may add a short note if helpful.",
+const SYSTEM_MEDIA_TOOLS = [
+  "Images and video (generate_image, edit_image, generate_video, extend_video):",
+  "- generate_image: new image from a text prompt only (no reference photo) — Replicate FLUX.",
+  "- edit_image (Nano Banana 2): When the user wants to change, edit, restyle, recolor, or transform an image—call edit_image in this turn. Source images include user uploads AND images already generated or edited earlier in this chat; they are resolved automatically. Never ask the user to re-attach an image that is already visible in the thread.",
+  "- edit_image behavior (critical): Prefer acting over interviewing. If the request is clear (e.g. ‘remove the shadow’, ‘make this kitchen black themed’), call edit_image immediately—do not ask ‘would you like me to edit’ or tell them to attach the image again.",
   "- If they only want verbal suggestions with no edit, answer in text and do not call edit_image.",
-  "- generate_video: short clip from a text prompt.",
-  "- For generate_image / generate_video you choose quality_tier from context; never ask the user to pick a vendor or tier.",
+  "- generate_video: short clip from a text prompt — Replicate (Seedance fast / Kling 3).",
+  "- extend_video: continue or lengthen a video already in the chat — Replicate Seedance (reference_videos). Use when they want more footage after an existing clip; source video is resolved from prior generate_video/extend_video results or user uploads.",
+  "- For generate_image / generate_video / extend_video you choose quality_tier from context; edit_image has no tier. Never ask the user to pick a vendor or tier.",
   "- After media tools succeed, reply briefly; this UI shows the picture or player—do not paste long URLs or provider jargon.",
 ].join("\n");
 
@@ -174,8 +175,8 @@ export async function POST(req: Request) {
   }
 
   const workspaceTools = getWorkspaceFileTools();
-  const falMediaTools = getFalMediaTools(messages);
-  const hasFalMedia = Object.keys(falMediaTools).length > 0;
+  const mediaTools = getMediaTools(messages);
+  const hasMediaTools = Object.keys(mediaTools).length > 0;
 
   let languageModel: LanguageModel;
   let tools: ToolSet | undefined;
@@ -184,13 +185,13 @@ export async function POST(req: Request) {
   if (!enableWebSearch) {
     languageModel =
       provider === "openai" ? openai.chat(model) : anthropic.chat(model);
-    tools = { ...workspaceTools, ...falMediaTools };
+    tools = { ...workspaceTools, ...mediaTools };
   } else if (backend === "firecrawl") {
     languageModel =
       provider === "openai" ? openai.chat(model) : anthropic.chat(model);
     tools = {
       ...workspaceTools,
-      ...falMediaTools,
+      ...mediaTools,
       ...getFirecrawlWebSearchTools(),
     };
     searchSystem = SYSTEM_FIRECRAWL;
@@ -201,7 +202,7 @@ export async function POST(req: Request) {
       languageModel = openai.responses(model);
       tools = {
         ...workspaceTools,
-        ...falMediaTools,
+        ...mediaTools,
         /** Lower context speeds searches vs. high; keeps latency closer to fast consumer UIs. */
         web_search: openai.tools.webSearch({ searchContextSize: "low" }),
       };
@@ -210,7 +211,7 @@ export async function POST(req: Request) {
       languageModel = anthropic.chat(model);
       tools = {
         ...workspaceTools,
-        ...falMediaTools,
+        ...mediaTools,
         /** Hard cap prevents long chains of searches on one reply (major latency driver). */
         web_search: anthropic.tools.webSearch_20260209({ maxUses: 2 }),
       };
@@ -237,8 +238,8 @@ export async function POST(req: Request) {
   systemParts.push(SYSTEM_RESPONSE_BALANCE);
   systemParts.push(SYSTEM_DRAFT_ARTIFACT);
   systemParts.push(SYSTEM_WORKSPACE_FILES);
-  if (hasFalMedia) {
-    systemParts.push(SYSTEM_FAL_MEDIA);
+  if (hasMediaTools) {
+    systemParts.push(SYSTEM_MEDIA_TOOLS);
   }
   if (searchSystem) {
     systemParts.push(searchSystem);
@@ -257,7 +258,7 @@ export async function POST(req: Request) {
           tools,
           toolChoice: "auto",
           /** Caps sequential model↔tool rounds (each extra round adds seconds—ChatGPT-like UX stays low). */
-          /** Room for web search, workspace file, and optional fal media in one reply. */
+          /** Room for web search, workspace file, and optional media tools in one reply. */
           stopWhen: stepCountIs(10),
           providerOptions:
             provider === "openai"
