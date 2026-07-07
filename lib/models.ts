@@ -2,8 +2,8 @@ export type ProviderId = "openai" | "anthropic";
 
 /** Highest reasoning depth / longest outputs when Max mode is on (aligned with @ai-sdk model IDs). */
 export const MAX_MODE_MODEL: Record<ProviderId, string> = {
-  openai: "gpt-5.4-pro",
-  anthropic: "claude-opus-4-7",
+  openai: "gpt-5.5",
+  anthropic: "claude-opus-4-8",
 };
 
 export type ModelTier = "max" | "intelligent" | "balanced" | "fast";
@@ -35,34 +35,20 @@ function m(id: string, tier: ModelTier, name: string): LabeledModel {
 }
 
 /**
- * Latest catalog (verify against provider docs). IDs match @ai-sdk/openai + @ai-sdk/anthropic unions.
+ * Curated catalog — one pick per tier, latest generation only.
+ * IDs match @ai-sdk/openai + @ai-sdk/anthropic (v4.x).
  */
 export const OPENAI_MODELS: LabeledModel[] = [
-  m("gpt-5.4-pro", "max", "GPT-5.4 Pro — frontier reasoning"),
+  m("gpt-5.5", "max", "GPT-5.5 — frontier"),
   m("gpt-5.4", "intelligent", "GPT-5.4"),
   m("gpt-5.4-mini", "balanced", "GPT-5.4 Mini"),
   m("gpt-5.4-nano", "fast", "GPT-5.4 Nano"),
-  m("gpt-5.2", "intelligent", "GPT-5.2"),
-  m("gpt-5.2-pro", "max", "GPT-5.2 Pro"),
-  m("gpt-5.1", "balanced", "GPT-5.1"),
-  m("gpt-5-mini", "balanced", "GPT-5 Mini"),
-  m("gpt-5-nano", "fast", "GPT-5 Nano"),
-  m("gpt-4.1", "balanced", "GPT-4.1"),
-  m("gpt-4o", "balanced", "GPT-4o"),
-  m("gpt-4o-mini", "fast", "GPT-4o Mini"),
-  m("o4-mini", "balanced", "o4-mini"),
-  m("o3-mini", "fast", "o3-mini"),
 ];
 
 export const ANTHROPIC_MODELS: LabeledModel[] = [
-  m("claude-opus-4-7", "max", "Opus 4.7 — strongest"),
-  m("claude-opus-4-6", "max", "Opus 4.6"),
-  m("claude-opus-4-5-20251101", "intelligent", "Opus 4.5"),
-  m("claude-opus-4-1", "intelligent", "Opus 4.1"),
-  m("claude-sonnet-4-6", "intelligent", "Sonnet 4.6 — speed + IQ"),
-  m("claude-sonnet-4-5-20250929", "balanced", "Sonnet 4.5"),
-  m("claude-sonnet-4-5", "balanced", "Sonnet 4.5 (alias)"),
-  m("claude-haiku-4-5-20251001", "fast", "Haiku 4.5"),
+  m("claude-opus-4-8", "max", "Opus 4.8 — strongest"),
+  m("claude-sonnet-5", "intelligent", "Sonnet 5 — speed + IQ"),
+  m("claude-haiku-4-5", "fast", "Haiku 4.5"),
 ];
 
 export function modelsForProvider(provider: ProviderId): LabeledModel[] {
@@ -70,7 +56,7 @@ export function modelsForProvider(provider: ProviderId): LabeledModel[] {
 }
 
 export function defaultModel(provider: ProviderId): string {
-  return provider === "openai" ? "gpt-5-mini" : "claude-sonnet-4-5-20250929";
+  return provider === "openai" ? "gpt-5.4-mini" : "claude-sonnet-5";
 }
 
 export function resolveEffectiveModel(

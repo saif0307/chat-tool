@@ -11,12 +11,12 @@
     "test:media-image": "node scripts/test-media-keys.mjs --generate-image"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.71",
-    "@ai-sdk/openai": "^3.0.53",
-    "@ai-sdk/react": "^3.0.170",
+    "@ai-sdk/anthropic": "^4.0.8",
+    "@ai-sdk/openai": "^4.0.8",
+    "@ai-sdk/react": "^4.0.17",
     "@tippyjs/react": "^4.2.6",
     "@vercel/blob": "^2.3.3",
-    "ai": "^6.0.168",
+    "ai": "^7.0.16",
     "docx": "^9.6.1",
     "highlight.js": "^11.11.1",
     "jose": "^6.2.2",
