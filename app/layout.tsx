@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AppSwitcher } from "@/components/app-switcher/app-switcher";
 import "./globals.css";
 
 /** UI copy — readable, modern; keeps variable names expected by `globals.css` / Tailwind theme. */
@@ -39,7 +40,10 @@ export default function RootLayout({
       className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
     >
       <body className="font-sans flex min-h-full flex-col">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <AppSwitcher />
+        </ThemeProvider>
       </body>
     </html>
   );

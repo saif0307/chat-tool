@@ -6,9 +6,14 @@ import {
   type ToolSet,
   type UIMessage,
 } from "ai";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
 import type { ProviderId } from "@/lib/models";
+import {
+  createAnthropicClient,
+  createOpenAIClient,
+  hasProviderKey,
+  missingProviderKeyMessage,
+} from "@/lib/ai/provider-clients";
+import { getFirecrawlApiKey } from "@/lib/firecrawl/client";
 import { getMediaTools } from "@/lib/tools/media-tools";
 import { getFirecrawlWebSearchTools } from "@/lib/tools/web-search-firecrawl";
 import { getWorkspaceFileTools } from "@/lib/tools/workspace-files";
@@ -138,33 +143,16 @@ export async function POST(req: Request) {
     return Response.json({ error: "model is required" }, { status: 400 });
   }
 
-  const openaiKey = process.env.OPENAI_API_KEY;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-
-  if (provider === "openai" && !openaiKey) {
-    return Response.json(
-      { error: "Missing OPENAI_API_KEY. Add it to your environment." },
-      { status: 503 },
-    );
+  if (!hasProviderKey(provider)) {
+    return Response.json({ error: missingProviderKeyMessage(provider) }, { status: 503 });
   }
 
-  if (provider === "anthropic" && !anthropicKey) {
-    return Response.json(
-      { error: "Missing ANTHROPIC_API_KEY. Add it to your environment." },
-      { status: 503 },
-    );
-  }
-
-  const openai = createOpenAI({ apiKey: openaiKey ?? "" });
-  const anthropic = createAnthropic({ apiKey: anthropicKey ?? "" });
+  const openai = createOpenAIClient();
+  const anthropic = createAnthropicClient();
 
   const backend = webSearchBackend();
 
-  if (
-    enableWebSearch &&
-    backend === "firecrawl" &&
-    !process.env.FIRECRAWL_API_KEY
-  ) {
+  if (enableWebSearch && backend === "firecrawl" && !getFirecrawlApiKey()) {
     return Response.json(
       {
         error:

@@ -88,3 +88,41 @@ body {
 .markdown-body :where(strong) {
   font-weight: 600;
 }
+
+/* Shared floating-panel primitive (App Switcher, future menus) */
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.cs-popover-in {
+  animation: popover-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Content Studio — additive surface tokens layered on top of the shared background/foreground pair. */
+:root {
+  --cs-surface: #ffffff;
+  --cs-surface-hover: #f4f4f5;
+  --cs-border: color-mix(in oklab, var(--foreground) 10%, transparent);
+  --cs-accent: #8b5cf6;
+}
+
+.dark {
+  --cs-surface: #202023;
+  --cs-surface-hover: #29292d;
+  --cs-border: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --cs-accent: #a78bfa;
+}
+
+@theme inline {
+  --color-cs-surface: var(--cs-surface);
+  --color-cs-surface-hover: var(--cs-surface-hover);
+  --color-cs-border: var(--cs-border);
+  --color-cs-accent: var(--cs-accent);
+}
